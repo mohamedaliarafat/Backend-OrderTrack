@@ -1119,17 +1119,23 @@ exports.sendArrivalReminder = async (req, res) => {
     // =========================
     // 📧 إرسال الإيميل لكل المستخدمين
     // =========================
-    try {
-      const emails = await getOrderEmails(order);
+   try {
+  const emails = await getOrderEmails(order);
 
-     if (!emails || emails.length === 0) {
-  console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
-} else {
-  await sendEmail({
-    to: emails,
-    subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
-    html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
-  });
+  if (!emails || emails.length === 0) {
+    console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+  } else {
+    await sendEmail({
+      to: emails,
+      subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+      html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
+    });
+  }
+} catch (emailError) {
+  console.error(
+    `❌ Failed to send arrival reminder email for order ${order.orderNumber}:`,
+    emailError.message
+  );
 }
 
 
