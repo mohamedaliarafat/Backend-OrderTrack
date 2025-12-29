@@ -746,11 +746,15 @@ exports.createOrder = async (req, res) => {
       try {
         const emails = await getOrderEmails(populatedOrder);
 
-        await sendEmail({
-          to: emails,
-          subject: `📦 تم إنشاء طلب جديد - ${order.orderNumber}`,
-          html: EmailTemplates.orderCreatedTemplate(populatedOrder),
-        });
+       if (!emails || emails.length === 0) {
+          console.log('⚠️ No valid emails found for order creation');
+        } else {
+          await sendEmail({
+            to: emails,
+            subject: `📦 تم إنشاء طلب جديد - ${order.orderNumber}`,
+            html: EmailTemplates.orderCreatedTemplate(populatedOrder),
+          });
+        }
       } catch (emailError) {
         // لا نوقف العملية لو الإيميل فشل
         console.error('❌ Email sending failed:', emailError.message);
@@ -884,14 +888,19 @@ exports.getUpcomingOrders = async (req, res) => {
 
             const emails = await getOrderEmails(order);
 
-            await sendEmail({
-              to: emails,
-              subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
-              html: EmailTemplates.arrivalReminderTemplate(
-                order,
-                timeRemaining
-              ),
-            });
+           if (!emails || emails.length === 0) {
+              console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+            } else {
+              await sendEmail({
+                to: emails,
+                subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+                html: EmailTemplates.arrivalReminderTemplate(
+                  order,
+                  timeRemaining
+                ),
+              });
+            }
+
 
             // تحديث وقت الإرسال
             order.arrivalEmailSentAt = new Date();
@@ -977,14 +986,19 @@ exports.getOrdersWithTimers = async (req, res) => {
         try {
           const emails = await getOrderEmails(order);
 
-          await sendEmail({
-            to: emails,
-            subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
-            html: EmailTemplates.arrivalReminderTemplate(
-              order,
-              formatDuration(arrivalRemaining)
-            ),
-          });
+          if (!emails || emails.length === 0) {
+              console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+            } else {
+              await sendEmail({
+                to: emails,
+                subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+                html: EmailTemplates.arrivalReminderTemplate(
+                  order,
+                  formatDuration(arrivalRemaining)
+                ),
+              });
+            }
+
 
           order.arrivalEmailSentAt = new Date();
           await order.save();
@@ -1108,14 +1122,16 @@ exports.sendArrivalReminder = async (req, res) => {
     try {
       const emails = await getOrderEmails(order);
 
-      await sendEmail({
-        to: emails,
-        subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
-        html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
-      });
-    } catch (emailError) {
-      console.error('❌ Failed to send arrival reminder email:', emailError.message);
-    }
+     if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+    html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
+  });
+}
+
 
     // =========================
     // 🕒 تحديث حالة الإرسال
@@ -1324,15 +1340,20 @@ exports.updateOrder = async (req, res) => {
 
           const emails = await getOrderEmails(populatedForEmail);
 
-          await sendEmail({
-            to: emails,
-            subject: `✏️ تحديث على الطلب ${order.orderNumber}`,
-            html: EmailTemplates.orderUpdatedTemplate(
-              populatedForEmail,
-              changes,
-              req.user.name
-            ),
-          });
+         if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for order update - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `✏️ تحديث على الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderUpdatedTemplate(
+      populatedForEmail,
+      changes,
+      req.user.name
+    ),
+  });
+}
+
         } catch (emailError) {
           console.error(
             '❌ Failed to send update email:',
@@ -1421,16 +1442,21 @@ exports.updateOrderStatus = async (req, res) => {
 
       const emails = await getOrderEmails(populatedForEmail);
 
-      await sendEmail({
-        to: emails,
-        subject: `🔄 تحديث حالة الطلب ${order.orderNumber}`,
-        html: EmailTemplates.orderStatusTemplate(
-          populatedForEmail,
-          oldStatus,
-          status,
-          req.user.name
-        ),
-      });
+     if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for order status update - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `🔄 تحديث حالة الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderStatusTemplate(
+      populatedForEmail,
+      oldStatus,
+      status,
+      req.user.name
+    ),
+  });
+}
+
     } catch (emailError) {
       console.error(
         '❌ Failed to send order status email:',
@@ -1473,14 +1499,19 @@ exports.deleteOrder = async (req, res) => {
     try {
       const emails = await getOrderEmails(order);
 
-      await sendEmail({
-        to: emails,
-        subject: `🗑️ تم حذف الطلب ${order.orderNumber}`,
-        html: EmailTemplates.orderDeletedTemplate(
-          order,
-          req.user.name // اسم المستخدم الذي حذف
-        ),
-      });
+      if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for order deletion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `🗑️ تم حذف الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderDeletedTemplate(
+      order,
+      req.user.name
+    ),
+  });
+}
+
     } catch (emailError) {
       console.error(
         '❌ Failed to send delete order email:',
@@ -1556,15 +1587,20 @@ exports.deleteAttachment = async (req, res) => {
     try {
       const emails = await getOrderEmails(order);
 
-      await sendEmail({
-        to: emails,
-        subject: `📎 حذف مرفق من الطلب ${order.orderNumber}`,
-        html: EmailTemplates.attachmentDeletedTemplate(
-          order,
-          attachment.filename,
-          req.user.name // اسم المستخدم الذي حذف
-        ),
-      });
+     if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for attachment deletion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `📎 حذف مرفق من الطلب ${order.orderNumber}`,
+    html: EmailTemplates.attachmentDeletedTemplate(
+      order,
+      attachment.filename,
+      req.user.name
+    ),
+  });
+}
+
     } catch (emailError) {
       console.error(
         '❌ Failed to send attachment delete email:',
@@ -1665,14 +1701,19 @@ exports.checkArrivalNotifications = async () => {
 
           const emails = await getOrderEmails(order);
 
-          await sendEmail({
-            to: emails,
-            subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
-            html: EmailTemplates.arrivalReminderTemplate(
-              order,
-              formatDuration(timeRemainingMs)
-            ),
-          });
+          if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+    html: EmailTemplates.arrivalReminderTemplate(
+      order,
+      formatDuration(timeRemainingMs)
+    ),
+  });
+}
+
         } catch (emailError) {
           console.error(
             `❌ Email failed for order ${order.orderNumber}:`,
@@ -1780,16 +1821,21 @@ exports.checkCompletedLoading = async () => {
         try {
           const emails = await getOrderEmails(order);
 
-          await sendEmail({
-            to: emails,
-            subject: `✅ تم اكتمال تحميل الطلب ${order.orderNumber}`,
-            html: EmailTemplates.orderStatusTemplate(
-              order,
-              oldStatus,
-              'تم التحميل',
-              'النظام'
-            ),
-          });
+          if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for loading completion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `✅ تم اكتمال تحميل الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderStatusTemplate(
+      order,
+      oldStatus,
+      'تم التحميل',
+      'النظام'
+    ),
+  });
+}
+
         } catch (emailError) {
           console.error(
             `❌ Email failed for order ${order.orderNumber}:`,
