@@ -1,14 +1,13 @@
 const { Resend } = require("resend");
 
-// تهيئة Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
- * دالة إرسال إيميل عامة
+ * إرسال إيميل عام
  * @param {Object} params
- * @param {string|string[]} params.to - البريد المستلم
- * @param {string} params.subject - عنوان الإيميل
- * @param {string} params.html - محتوى HTML
+ * @param {string|string[]} params.to
+ * @param {string} params.subject
+ * @param {string} params.html
  */
 exports.sendEmail = async ({ to, subject, html }) => {
   try {
@@ -19,7 +18,7 @@ exports.sendEmail = async ({ to, subject, html }) => {
       html,
     });
 
-    console.log("📧 Email sent successfully:", response.id);
+    console.log("📧 Email sent:", response.id);
     return response;
   } catch (error) {
     console.error("❌ Email error:", error);
