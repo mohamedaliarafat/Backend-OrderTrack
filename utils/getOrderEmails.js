@@ -1,18 +1,43 @@
 const User = require('../models/User');
 
 module.exports = async (order) => {
-  const emails = new Set();
+  const emails = [];
 
-  if (order.customer?.email) emails.add(order.customer.email);
-  if (order.createdBy?.email) emails.add(order.createdBy.email);
+  // 👤 إيميل العميل
+  if (order.customer?.email && typeof order.customer.email === 'string') {
+    emails.push(order.customer.email.trim());
+  }
 
+  // 👨‍💼 إيميل منشئ الطلب
+  if (order.createdBy?.email && typeof order.createdBy.email === 'string') {
+    emails.push(order.createdBy.email.trim());
+  }
+
+  // 🔐 Admin فقط (حسب الموديل الفعلي)
   const admins = await User.find({
-    role: { $in: ['admin', 'manager'] },
-    isActive: true,
-    email: { $exists: true }
+    role: 'admin',
+    email: { $exists: true, $ne: null }
+  }).select('email');
+
+  admins.forEach(u => {
+    if (u.email && typeof u.email === 'string') {
+      emails.push(u.email.trim());
+    }
   });
 
-  admins.forEach(u => emails.add(u.email));
+  // 🧹 تنظيف نهائي + إزالة التكرار
+  const cleanEmails = [
+    ...new Set(
+      emails.filter(
+        e =>
+          typeof e === 'string' &&
+          e.includes('@') &&
+          e.includes('.')
+      )
+    )
+  ];
 
-  return [...emails];
+  console.log('📨 Auto email recipients:', cleanEmails);
+
+  return cleanEmails;
 };
