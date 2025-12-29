@@ -584,6 +584,9 @@
 
 const Order = require('../models/Order');
 const Customer = require('../models/Customer');
+const { sendEmail } = require('../services/emailService');
+const EmailTemplates = require('../services/emailTemplates');
+const getOrderEmails = require('../utils/getOrderEmails');
 const Activity = require('../models/Activity');
 const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
@@ -716,7 +719,7 @@ exports.createOrder = async (req, res) => {
       const order = new Order(orderData);
       await order.save();
 
-      // 🔥🔥 الحل هنا: إعادة جلب الطلب مع populate 🔥🔥
+      // 🔥 إعادة جلب الطلب مع populate
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone email')
         .populate('createdBy', 'name email');
@@ -731,19 +734,31 @@ exports.createOrder = async (req, res) => {
         changes: {
           'رقم الطلب': order.orderNumber,
           'المورد': order.supplierName,
-          'وقت التحميل': `${order.loadingDate.toLocaleDateString(
-            'ar-SA'
-          )} ${order.loadingTime}`,
-          'وقت الوصول': `${order.arrivalDate.toLocaleDateString(
-            'ar-SA'
-          )} ${order.arrivalTime}`,
+          'وقت التحميل': `${order.loadingDate.toLocaleDateString('ar-SA')} ${order.loadingTime}`,
+          'وقت الوصول': `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
         },
       });
       await activity.save();
 
+      // =========================
+      // 📧 إرسال الإيميل
+      // =========================
+      try {
+        const emails = await getOrderEmails(populatedOrder);
+
+        await sendEmail({
+          to: emails,
+          subject: `📦 تم إنشاء طلب جديد - ${order.orderNumber}`,
+          html: EmailTemplates.orderCreatedTemplate(populatedOrder),
+        });
+      } catch (emailError) {
+        // لا نوقف العملية لو الإيميل فشل
+        console.error('❌ Email sending failed:', emailError.message);
+      }
+
       return res.status(201).json({
         message: 'تم إنشاء الطلب بنجاح',
-        order: populatedOrder, // ✅ مهم جدًا
+        order: populatedOrder,
       });
     });
   } catch (error) {
@@ -751,6 +766,7 @@ exports.createOrder = async (req, res) => {
     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // جلب جميع الطلبات
 exports.getOrders = async (req, res) => {
@@ -839,72 +855,152 @@ exports.getOrder = async (req, res) => {
 exports.getUpcomingOrders = async (req, res) => {
   try {
     const now = new Date();
-    const twoAndHalfHoursLater = new Date(now.getTime() + (2.5 * 60 * 60 * 1000));
-    
-    // البحث عن الطلبات التي موعدها خلال الساعتين ونصف القادمة
+
+    // ⏰ ساعتين قبل الوصول
+    const twoHoursBefore = new Date(now.getTime() + (2 * 60 * 60 * 1000));
+
+    // جلب الطلبات المحتملة
     const orders = await Order.find({
-      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'مخصص للعميل'] }
+      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'مخصص للعميل'] },
     }).populate('customer createdBy driver');
-    
-    const upcomingOrders = orders.filter(order => {
+
+    const upcomingOrders = [];
+
+    for (const order of orders) {
       const arrivalDateTime = order.getFullArrivalDateTime();
-      return arrivalDateTime >= now && arrivalDateTime <= twoAndHalfHoursLater;
-    });
-    
-    res.json(upcomingOrders);
+
+      // الطلب داخل نطاق الإشعار (قبل الوصول بساعتين)
+      if (
+        arrivalDateTime > now &&
+        arrivalDateTime <= twoHoursBefore
+      ) {
+        upcomingOrders.push(order);
+
+        // 🟢 إرسال الإيميل مرة واحدة فقط
+        if (!order.arrivalEmailSentAt) {
+          try {
+            const timeRemainingMs = arrivalDateTime - now;
+            const timeRemaining = formatDuration(timeRemainingMs);
+
+            const emails = await getOrderEmails(order);
+
+            await sendEmail({
+              to: emails,
+              subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+              html: EmailTemplates.arrivalReminderTemplate(
+                order,
+                timeRemaining
+              ),
+            });
+
+            // تحديث وقت الإرسال
+            order.arrivalEmailSentAt = new Date();
+            await order.save();
+
+            console.log(
+              `📧 Arrival email sent for order ${order.orderNumber}`
+            );
+          } catch (emailError) {
+            console.error(
+              `❌ Failed to send arrival email for order ${order.orderNumber}`,
+              emailError.message
+            );
+          }
+        }
+      }
+    }
+
+    return res.json(upcomingOrders);
   } catch (error) {
-    res.status(500).json({ error: 'حدث خطأ في جلب الطلبات القريبة' });
+    console.error(error);
+    return res
+      .status(500)
+      .json({ error: 'حدث خطأ في جلب الطلبات القريبة' });
   }
 };
+
 
 exports.getOrdersWithTimers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const skip = (page - 1) * limit;
-    
+
     const filter = {};
-    
+
     if (req.query.status) {
       filter.status = req.query.status;
     }
-    
+
     if (req.query.supplierName) {
       filter.supplierName = new RegExp(req.query.supplierName, 'i');
     }
-    
+
     // جلب الطلبات
     const orders = await Order.find(filter)
-      .populate('customer', 'name code')
+      .populate('customer', 'name code email')
       .populate('driver', 'name phone vehicleNumber')
-      .sort({ arrivalDate: 1, arrivalTime: 1 }) // ترتيب حسب وقت الوصول
+      .populate('createdBy', 'name email')
+      .sort({ arrivalDate: 1, arrivalTime: 1 })
       .skip(skip)
       .limit(limit);
-    
+
     const total = await Order.countDocuments(filter);
-    
-    // إضافة معلومات المؤقت لكل طلب
-    const ordersWithTimers = orders.map(order => {
+    const now = new Date();
+
+    const ordersWithTimers = [];
+
+    for (const order of orders) {
       const arrivalDateTime = order.getFullArrivalDateTime();
       const loadingDateTime = order.getFullLoadingDateTime();
-      const now = new Date();
-      
+
       const arrivalRemaining = arrivalDateTime - now;
       const loadingRemaining = loadingDateTime - now;
-      
-      const arrivalCountdown = arrivalRemaining > 0 ? 
-        formatDuration(arrivalRemaining) : 'تأخر';
-      
-      const loadingCountdown = loadingRemaining > 0 ? 
-        formatDuration(loadingRemaining) : 'تأخر';
-      
-      // تحديد إذا كان الطلب يحتاج إشعار قبل الوصول
-      const needsArrivalNotification = 
-        arrivalRemaining > 0 && 
-        arrivalRemaining <= (2.5 * 60 * 60 * 1000) &&
-        !order.arrivalNotificationSentAt;
-      
-      return {
+
+      const arrivalCountdown =
+        arrivalRemaining > 0 ? formatDuration(arrivalRemaining) : 'تأخر';
+
+      const loadingCountdown =
+        loadingRemaining > 0 ? formatDuration(loadingRemaining) : 'تأخر';
+
+      // ⏰ قبل الوصول بساعتين
+      const isApproachingArrival =
+        arrivalRemaining > 0 &&
+        arrivalRemaining <= 2 * 60 * 60 * 1000;
+
+      const isApproachingLoading =
+        loadingRemaining > 0 &&
+        loadingRemaining <= 2.5 * 60 * 60 * 1000;
+
+      // 📧 إرسال الإيميل (مرة واحدة فقط)
+      if (isApproachingArrival && !order.arrivalEmailSentAt) {
+        try {
+          const emails = await getOrderEmails(order);
+
+          await sendEmail({
+            to: emails,
+            subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+            html: EmailTemplates.arrivalReminderTemplate(
+              order,
+              formatDuration(arrivalRemaining)
+            ),
+          });
+
+          order.arrivalEmailSentAt = new Date();
+          await order.save();
+
+          console.log(
+            `📧 Arrival reminder email sent for order ${order.orderNumber}`
+          );
+        } catch (emailError) {
+          console.error(
+            `❌ Failed to send arrival email for order ${order.orderNumber}`,
+            emailError.message
+          );
+        }
+      }
+
+      ordersWithTimers.push({
         ...order.toObject(),
         arrivalDateTime,
         loadingDateTime,
@@ -912,25 +1008,30 @@ exports.getOrdersWithTimers = async (req, res) => {
         loadingRemaining,
         arrivalCountdown,
         loadingCountdown,
-        needsArrivalNotification,
-        isApproachingArrival: arrivalRemaining > 0 && arrivalRemaining <= (2.5 * 60 * 60 * 1000),
-        isApproachingLoading: loadingRemaining > 0 && loadingRemaining <= (2.5 * 60 * 60 * 1000)
-      };
-    });
-    
-    res.json({
+        needsArrivalNotification:
+          isApproachingArrival && !order.arrivalEmailSentAt,
+        isApproachingArrival,
+        isApproachingLoading,
+      });
+    }
+
+    return res.json({
       orders: ordersWithTimers,
       pagination: {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
-      }
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
-    res.status(500).json({ error: 'حدث خطأ في جلب الطلبات' });
+    console.error(error);
+    return res
+      .status(500)
+      .json({ error: 'حدث خطأ في جلب الطلبات' });
   }
 };
+
 
 // وظيفة مساعدة لتنسيق المدة
 function formatDuration(milliseconds) {
@@ -950,34 +1051,39 @@ function formatDuration(milliseconds) {
 exports.sendArrivalReminder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    
+
     const order = await Order.findById(orderId)
-      .populate('customer createdBy');
-    
+      .populate('customer', 'name email')
+      .populate('createdBy', 'name email');
+
     if (!order) {
       return res.status(404).json({ error: 'الطلب غير موجود' });
     }
-    
+
     const User = require('../models/User');
     const Notification = require('../models/Notification');
-    
-    // جلب المستخدمين الذين يجب إرسال إشعار لهم
+    const Activity = require('../models/Activity');
+
+    // 🧑‍💼 المستخدمين المستهدفين (منشئ الطلب + الإداريين)
     const usersToNotify = await User.find({
       $or: [
-        { _id: order.createdBy._id },
+        { _id: order.createdBy?._id },
         { role: { $in: ['admin', 'manager'] } }
       ],
       isActive: true
     });
-    
+
     if (usersToNotify.length === 0) {
       return res.status(400).json({ error: 'لا يوجد مستخدمون للإشعار' });
     }
-    
+
     const arrivalDateTime = order.getFullArrivalDateTime();
-    const timeRemaining = formatDuration(arrivalDateTime - new Date());
-    
-    // إنشاء الإشعار
+    const timeRemainingMs = arrivalDateTime - new Date();
+    const timeRemaining = formatDuration(timeRemainingMs);
+
+    // =========================
+    // 🔔 إنشاء Notification
+    // =========================
     const notification = new Notification({
       type: 'arrival_reminder',
       title: 'تذكير بقرب وقت الوصول',
@@ -993,19 +1099,38 @@ exports.sendArrivalReminder = async (req, res) => {
       recipients: usersToNotify.map(user => ({ user: user._id })),
       createdBy: req.user._id
     });
-    
+
     await notification.save();
-    
-    // تحديث وقت الإشعار في الطلب
+
+    // =========================
+    // 📧 إرسال الإيميل لكل المستخدمين
+    // =========================
+    try {
+      const emails = await getOrderEmails(order);
+
+      await sendEmail({
+        to: emails,
+        subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+        html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
+      });
+    } catch (emailError) {
+      console.error('❌ Failed to send arrival reminder email:', emailError.message);
+    }
+
+    // =========================
+    // 🕒 تحديث حالة الإرسال
+    // =========================
     order.arrivalNotificationSentAt = new Date();
+    order.arrivalEmailSentAt = new Date();
     await order.save();
-    
-    // تسجيل النشاط
-    const Activity = require('../models/Activity');
+
+    // =========================
+    // 📝 تسجيل النشاط
+    // =========================
     const activity = new Activity({
       orderId: order._id,
       activityType: 'إشعار',
-      description: `تم إرسال إشعار تذكير قبل الوصول للطلب رقم ${order.orderNumber}`,
+      description: `تم إرسال إشعار وإيميل تذكير قبل الوصول للطلب رقم ${order.orderNumber}`,
       performedBy: req.user._id,
       performedByName: req.user.name,
       changes: {
@@ -1014,18 +1139,19 @@ exports.sendArrivalReminder = async (req, res) => {
       }
     });
     await activity.save();
-    
-    res.json({
-      message: 'تم إرسال الإشعار بنجاح',
+
+    return res.json({
+      message: 'تم إرسال الإشعار والإيميل بنجاح',
       notification,
       timeRemaining
     });
-    
+
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في إرسال الإشعار' });
+    return res.status(500).json({ error: 'حدث خطأ في إرسال الإشعار' });
   }
 };
+
 
 
 // تحديث الطلب (محدود للسائق والملاحظات والمرفقات فقط)
@@ -1041,75 +1167,63 @@ exports.updateOrder = async (req, res) => {
         return res.status(404).json({ error: 'الطلب غير موجود' });
       }
 
-      // السماح بتعديل حقول أكثر مرونة
+      // الحقول المسموح تعديلها
       const allowedUpdates = [
         'driverName',
-        'driverPhone', 
+        'driverPhone',
         'vehicleNumber',
         'notes',
         'actualArrivalTime',
         'loadingDuration',
         'delayReason',
-        'customer', // يسمح بتغيير العميل
+        'customer',
       ];
 
       const updates = {};
       Object.keys(req.body).forEach((key) => {
         if (allowedUpdates.includes(key)) {
-          // السماح بقيم فارغة لحذف البيانات (null أو '')
           updates[key] = req.body[key] !== undefined ? req.body[key] : null;
         }
       });
 
-      // 🌟 معالجة تغيير العميل 🌟
+      // ===== معالجة تغيير العميل =====
       if ('customer' in updates) {
-        if (updates.customer === null || updates.customer === '') {
-          // حالة حذف العميل
+        if (!updates.customer) {
           updates.customer = null;
-          
-          // إذا كان الطلب في حالة "مخصص للعميل" وتم حذف العميل
           if (order.status === 'مخصص للعميل') {
             updates.status = 'قيد الانتظار';
           }
-          
-        } else if (updates.customer) {
-          // حالة تغيير العميل
+        } else {
           const customer = await Customer.findById(updates.customer);
           if (!customer) {
             return res.status(404).json({ error: 'العميل غير موجود' });
           }
-
-          // إذا كان الطلب في حالة "قيد الانتظار" وغير مخصص لعميل
           if (order.status === 'قيد الانتظار' && !order.customer) {
             updates.status = 'مخصص للعميل';
           }
         }
       }
 
-      // 🌟 معالجة تغيير السائق 🌟
-      // السماح بحذف بيانات السائق إذا تم إرسال قيم فارغة
-      if ('driverName' in updates && (updates.driverName === null || updates.driverName === '')) {
+      // ===== معالجة بيانات السائق =====
+      if ('driverName' in updates && !updates.driverName) {
         updates.driverName = null;
-        // حذف رقم هاتف السائق إذا تم حذف السائق
-        updates.driverPhone = null;
-      }
-      
-      if ('driverPhone' in updates && (updates.driverPhone === null || updates.driverPhone === '')) {
         updates.driverPhone = null;
       }
 
-      // 🌟 معالجة الملاحظات 🌟
-      // السماح بحذف الملاحظات أو تغييرها
+      if ('driverPhone' in updates && !updates.driverPhone) {
+        updates.driverPhone = null;
+      }
+
+      if ('vehicleNumber' in updates && !updates.vehicleNumber) {
+        updates.vehicleNumber = null;
+      }
+
+      // ===== الملاحظات =====
       if ('notes' in updates) {
         updates.notes = updates.notes || null;
       }
 
-      // 🌟 معالجة رقم السيارة 🌟
-      if ('vehicleNumber' in updates && (updates.vehicleNumber === null || updates.vehicleNumber === '')) {
-        updates.vehicleNumber = null;
-      }
-
-      // معالجة المرفقات (تظل كما هي)
+      // ===== المرفقات =====
       if (req.files) {
         if (req.files.companyLogo) {
           return res.status(400).json({
@@ -1126,10 +1240,9 @@ exports.updateOrder = async (req, res) => {
         }
       }
 
-      // 🌟 معالجة وقت الوصول الفعلي 🌟
+      // ===== وقت الوصول الفعلي =====
       if ('actualArrivalTime' in updates) {
-        if (updates.actualArrivalTime === null || updates.actualArrivalTime === '') {
-          // السماح بحذف وقت الوصول
+        if (!updates.actualArrivalTime) {
           updates.actualArrivalTime = null;
         } else {
           const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
@@ -1151,49 +1264,45 @@ exports.updateOrder = async (req, res) => {
         }
       }
 
-      // 🌟 معالجة مدة التحميل 🌟
-      if ('loadingDuration' in updates && (updates.loadingDuration === null || updates.loadingDuration === '')) {
+      if ('loadingDuration' in updates && !updates.loadingDuration) {
         updates.loadingDuration = null;
       }
 
-      // 🌟 معالجة سبب التأخير 🌟
-      if ('delayReason' in updates && (updates.delayReason === null || updates.delayReason === '')) {
+      if ('delayReason' in updates && !updates.delayReason) {
         updates.delayReason = null;
       }
 
-      // حفظ البيانات القديمة لتتبع التغييرات
+      // ===== حفظ القيم القديمة =====
       const oldData = { ...order.toObject() };
 
-      // تحديث الطلب
+      // ===== تحديث الطلب =====
       Object.assign(order, updates);
       await order.save();
 
-      // 🌟 تسجيل التعديلات 🌟
+      // ===== حساب التغييرات =====
       const changes = {};
       Object.keys(updates).forEach((key) => {
-        // استبعاد المرفقات من سجل التغييرات
         if (key !== 'attachments') {
-          const oldValue = oldData[key];
-          const newValue = updates[key];
-          
-          // تسجيل التغيير فقط إذا اختلفت القيمة
-          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
-            let oldValueStr = 'غير محدد';
-            let newValueStr = 'غير محدد';
-            
-            if (oldValue !== null && oldValue !== undefined && oldValue !== '') {
-              oldValueStr = oldValue.toString();
-            }
-            
-            if (newValue !== null && newValue !== undefined && newValue !== '') {
-              newValueStr = newValue.toString();
-            }
-            
-            changes[key] = `من: ${oldValueStr} → إلى: ${newValueStr}`;
+          const oldVal = oldData[key];
+          const newVal = updates[key];
+
+          if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+            const oldStr =
+              oldVal !== null && oldVal !== undefined && oldVal !== ''
+                ? oldVal.toString()
+                : 'غير محدد';
+
+            const newStr =
+              newVal !== null && newVal !== undefined && newVal !== ''
+                ? newVal.toString()
+                : 'غير محدد';
+
+            changes[key] = `من: ${oldStr} → إلى: ${newStr}`;
           }
         }
       });
 
+      // ===== تسجيل Activity =====
       if (Object.keys(changes).length > 0) {
         const activity = new Activity({
           orderId: order._id,
@@ -1206,7 +1315,33 @@ exports.updateOrder = async (req, res) => {
         await activity.save();
       }
 
-      // جلب البيانات المحدثة مع العلاقات
+      // ===== إرسال الإيميل =====
+      if (Object.keys(changes).length > 0) {
+        try {
+          const populatedForEmail = await Order.findById(order._id)
+            .populate('customer', 'name email')
+            .populate('createdBy', 'name email');
+
+          const emails = await getOrderEmails(populatedForEmail);
+
+          await sendEmail({
+            to: emails,
+            subject: `✏️ تحديث على الطلب ${order.orderNumber}`,
+            html: EmailTemplates.orderUpdatedTemplate(
+              populatedForEmail,
+              changes,
+              req.user.name
+            ),
+          });
+        } catch (emailError) {
+          console.error(
+            '❌ Failed to send update email:',
+            emailError.message
+          );
+        }
+      }
+
+      // ===== إرجاع البيانات =====
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone email')
         .populate('createdBy', 'name email');
@@ -1225,12 +1360,13 @@ exports.updateOrder = async (req, res) => {
 };
 
 
+
 // تحديث حالة الطلب (للإداريين فقط)
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
+
     const order = await Order.findById(id);
     if (!order) {
       return res.status(404).json({ error: 'الطلب غير موجود' });
@@ -1242,16 +1378,27 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     const oldStatus = order.status;
+
+    // لو الحالة لم تتغير فعليًا
+    if (oldStatus === status) {
+      return res.json({
+        message: 'الحالة لم تتغير',
+        order,
+      });
+    }
+
     order.status = status;
-    
+
     // إذا تم تغيير الحالة إلى "تم التحميل"
     if (status === 'تم التحميل' && oldStatus !== 'تم التحميل') {
       order.loadingCompletedAt = new Date();
     }
-    
+
     await order.save();
 
-    // تسجيل النشاط
+    // =========================
+    // 📝 تسجيل النشاط
+    // =========================
     const activity = new Activity({
       orderId: order._id,
       activityType: 'تغيير حالة',
@@ -1259,26 +1406,58 @@ exports.updateOrderStatus = async (req, res) => {
       performedBy: req.user._id,
       performedByName: req.user.name,
       changes: {
-        'الحالة': `من: ${oldStatus} → إلى: ${status}`
-      }
+        الحالة: `من: ${oldStatus} → إلى: ${status}`,
+      },
     });
     await activity.save();
 
-    res.json({
+    // =========================
+    // 📧 إرسال الإيميل
+    // =========================
+    try {
+      const populatedForEmail = await Order.findById(order._id)
+        .populate('customer', 'name email')
+        .populate('createdBy', 'name email');
+
+      const emails = await getOrderEmails(populatedForEmail);
+
+      await sendEmail({
+        to: emails,
+        subject: `🔄 تحديث حالة الطلب ${order.orderNumber}`,
+        html: EmailTemplates.orderStatusTemplate(
+          populatedForEmail,
+          oldStatus,
+          status,
+          req.user.name
+        ),
+      });
+    } catch (emailError) {
+      console.error(
+        '❌ Failed to send order status email:',
+        emailError.message
+      );
+    }
+
+    return res.json({
       message: 'تم تحديث حالة الطلب بنجاح',
-      order
+      order,
+      oldStatus,
+      newStatus: status,
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // حذف الطلب
 exports.deleteOrder = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
-    
+    const order = await Order.findById(req.params.id)
+      .populate('customer', 'name email')
+      .populate('createdBy', 'name email');
+
     if (!order) {
       return res.status(404).json({ error: 'الطلب غير موجود' });
     }
@@ -1288,19 +1467,43 @@ exports.deleteOrder = async (req, res) => {
       return res.status(403).json({ error: 'غير مصرح بحذف الطلب' });
     }
 
-    // Delete associated files
+    // =========================
+    // 📧 إرسال إيميل قبل الحذف
+    // =========================
+    try {
+      const emails = await getOrderEmails(order);
+
+      await sendEmail({
+        to: emails,
+        subject: `🗑️ تم حذف الطلب ${order.orderNumber}`,
+        html: EmailTemplates.orderDeletedTemplate(
+          order,
+          req.user.name // اسم المستخدم الذي حذف
+        ),
+      });
+    } catch (emailError) {
+      console.error(
+        '❌ Failed to send delete order email:',
+        emailError.message
+      );
+    }
+
+    // =========================
+    // 🗑️ حذف الملفات المرتبطة
+    // =========================
     if (order.companyLogo && fs.existsSync(order.companyLogo)) {
       fs.unlinkSync(order.companyLogo);
     }
 
-    // Delete attachments
-    order.attachments.forEach(attachment => {
+    order.attachments.forEach((attachment) => {
       if (fs.existsSync(attachment.path)) {
         fs.unlinkSync(attachment.path);
       }
     });
 
-    // تسجيل النشاط قبل الحذف
+    // =========================
+    // 📝 تسجيل النشاط
+    // =========================
     const activity = new Activity({
       orderId: order._id,
       activityType: 'حذف',
@@ -1309,28 +1512,35 @@ exports.deleteOrder = async (req, res) => {
       performedByName: req.user.name,
       changes: {
         'رقم الطلب': order.orderNumber,
-        'المورد': order.supplierName
-      }
+        'المورد': order.supplierName,
+      },
     });
     await activity.save();
 
-    // حذف الطلب
+    // =========================
+    // ❌ حذف الطلب
+    // =========================
     await Order.findByIdAndDelete(req.params.id);
 
-    res.json({
-      message: 'تم حذف الطلب بنجاح'
+    return res.json({
+      message: 'تم حذف الطلب بنجاح',
     });
   } catch (error) {
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error(error);
+    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // حذف مرفق
 exports.deleteAttachment = async (req, res) => {
   try {
     const { orderId, attachmentId } = req.params;
-    
-    const order = await Order.findById(orderId);
+
+    const order = await Order.findById(orderId)
+      .populate('customer', 'name email')
+      .populate('createdBy', 'name email');
+
     if (!order) {
       return res.status(404).json({ error: 'الطلب غير موجود' });
     }
@@ -1340,16 +1550,42 @@ exports.deleteAttachment = async (req, res) => {
       return res.status(404).json({ error: 'الملف غير موجود' });
     }
 
-    // Delete file from server
+    // =========================
+    // 📧 إرسال إيميل قبل/بعد الحذف
+    // =========================
+    try {
+      const emails = await getOrderEmails(order);
+
+      await sendEmail({
+        to: emails,
+        subject: `📎 حذف مرفق من الطلب ${order.orderNumber}`,
+        html: EmailTemplates.attachmentDeletedTemplate(
+          order,
+          attachment.filename,
+          req.user.name // اسم المستخدم الذي حذف
+        ),
+      });
+    } catch (emailError) {
+      console.error(
+        '❌ Failed to send attachment delete email:',
+        emailError.message
+      );
+    }
+
+    // =========================
+    // 🗑️ حذف الملف من السيرفر
+    // =========================
     if (fs.existsSync(attachment.path)) {
       fs.unlinkSync(attachment.path);
     }
 
-    // إزالة من المصفوفة
+    // إزالة المرفق من الطلب
     order.attachments.pull(attachmentId);
     await order.save();
 
-    // تسجيل النشاط
+    // =========================
+    // 📝 تسجيل النشاط
+    // =========================
     const activity = new Activity({
       orderId: order._id,
       activityType: 'حذف',
@@ -1357,41 +1593,52 @@ exports.deleteAttachment = async (req, res) => {
       performedBy: req.user._id,
       performedByName: req.user.name,
       changes: {
-        'اسم الملف': attachment.filename
-      }
+        'اسم الملف': attachment.filename,
+      },
     });
     await activity.save();
 
-    res.json({
-      message: 'تم حذف الملف بنجاح'
+    return res.json({
+      message: 'تم حذف الملف بنجاح',
+      fileName: attachment.filename,
     });
   } catch (error) {
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error(error);
+    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // دالة للتحقق من الطلبات القريبة من وقت الوصول
 exports.checkArrivalNotifications = async () => {
   try {
     const now = new Date();
-    
-    // البحث عن الطلبات التي وصل وقت الإشعار الخاص بها (قبل الوصول بساعتين ونصف)
+
+    // الطلبات التي لم يُرسل لها إشعار بعد
     const orders = await Order.find({
       status: { $in: ['جاهز للتحميل', 'في انتظار التحميل', 'مخصص للعميل'] },
-      arrivalNotificationSentAt: { $exists: false }
-    }).populate('customer createdBy');
-    
+      arrivalNotificationSentAt: { $exists: false },
+    }).populate('customer', 'name email')
+      .populate('createdBy', 'name email');
+
+    const User = require('../models/User');
+    const Notification = require('../models/Notification');
+
     for (const order of orders) {
       const notificationTime = order.getArrivalNotificationTime();
-      
+
       if (now >= notificationTime) {
-        // إرسال إشعار
-        const User = require('../models/User');
-        const adminUsers = await User.find({ 
+        // =========================
+        // 🧑‍💼 Admin + Manager
+        // =========================
+        const adminUsers = await User.find({
           role: { $in: ['admin', 'manager'] },
-          isActive: true 
+          isActive: true,
         });
-        
+
+        // =========================
+        // 🔔 إنشاء Notification
+        // =========================
         const notification = new Notification({
           type: 'arrival_reminder',
           title: 'تذكير بقرب وقت الوصول',
@@ -1400,53 +1647,162 @@ exports.checkArrivalNotifications = async () => {
             orderId: order._id,
             orderNumber: order.orderNumber,
             expectedArrival: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
-            supplierName: order.supplierName
+            supplierName: order.supplierName,
+            auto: true,
           },
-          recipients: adminUsers.map(user => ({ user: user._id })),
-          createdBy: order.createdBy?._id
+          recipients: adminUsers.map((user) => ({ user: user._id })),
+          createdBy: order.createdBy?._id,
         });
-        
+
         await notification.save();
-        
-        // تحديث وقت الإشعار
+
+        // =========================
+        // 📧 إرسال الإيميل
+        // =========================
+        try {
+          const arrivalDateTime = order.getFullArrivalDateTime();
+          const timeRemainingMs = arrivalDateTime - now;
+
+          const emails = await getOrderEmails(order);
+
+          await sendEmail({
+            to: emails,
+            subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+            html: EmailTemplates.arrivalReminderTemplate(
+              order,
+              formatDuration(timeRemainingMs)
+            ),
+          });
+        } catch (emailError) {
+          console.error(
+            `❌ Email failed for order ${order.orderNumber}:`,
+            emailError.message
+          );
+        }
+
+        // =========================
+        // 🕒 تحديث حالة الإرسال
+        // =========================
         order.arrivalNotificationSentAt = new Date();
+        order.arrivalEmailSentAt = new Date();
         await order.save();
-        
-        console.log(`إشعار وصول تم إرساله للطلب: ${order.orderNumber}`);
+
+        console.log(
+          `🔔📧 Arrival notification + email sent for order ${order.orderNumber}`
+        );
       }
     }
   } catch (error) {
-    console.error('خطأ في التحقق من إشعارات الوصول:', error);
+    console.error('❌ خطأ في التحقق من إشعارات الوصول:', error);
   }
 };
+
 
 // دالة للتحقق من الطلبات التي انتهى وقت تحميلها
 exports.checkCompletedLoading = async () => {
   try {
     const now = new Date();
-    
-    // البحث عن الطلبات التي انتهى وقت تحميلها ولم يتم تحديث حالتها
+
+    // الطلبات التي انتهى وقت تحميلها ولم تُحدّث حالتها
     const orders = await Order.find({
       status: { $in: ['في انتظار التحميل', 'جاهز للتحميل'] },
-      loadingCompletedAt: { $exists: false }
-    });
-    
+      loadingCompletedAt: { $exists: false },
+    })
+      .populate('customer', 'name email')
+      .populate('createdBy', 'name email');
+
+    const Notification = require('../models/Notification');
+    const Activity = require('../models/Activity');
+    const User = require('../models/User');
+
     for (const order of orders) {
       const loadingDateTime = order.getFullLoadingDateTime();
-      
-      // إذا انقضى وقت التحميل بأكثر من ساعة
+
+      // ⏰ بعد ساعة من وقت التحميل
       const oneHourAfterLoading = new Date(loadingDateTime);
       oneHourAfterLoading.setHours(oneHourAfterLoading.getHours() + 1);
-      
+
       if (now >= oneHourAfterLoading) {
+        const oldStatus = order.status;
+
+        // =========================
+        // 🔄 تحديث حالة الطلب
+        // =========================
         order.status = 'تم التحميل';
         order.loadingCompletedAt = now;
         await order.save();
-        
-        console.log(`تم تحديث حالة الطلب ${order.orderNumber} إلى "تم التحميل" تلقائياً`);
+
+        // =========================
+        // 🧑‍💼 Admin + Manager
+        // =========================
+        const adminUsers = await User.find({
+          role: { $in: ['admin', 'manager'] },
+          isActive: true,
+        });
+
+        // =========================
+        // 🔔 Notification
+        // =========================
+        const notification = new Notification({
+          type: 'loading_completed',
+          title: 'اكتمل التحميل تلقائيًا',
+          message: `تم تحديث حالة الطلب ${order.orderNumber} إلى "تم التحميل" تلقائيًا`,
+          data: {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            oldStatus,
+            newStatus: 'تم التحميل',
+            auto: true,
+          },
+          recipients: adminUsers.map((u) => ({ user: u._id })),
+          createdBy: order.createdBy?._id,
+        });
+        await notification.save();
+
+        // =========================
+        // 📝 Activity Log
+        // =========================
+        const activity = new Activity({
+          orderId: order._id,
+          activityType: 'تغيير حالة',
+          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التحميل"`,
+          performedBy: null, // نظام
+          performedByName: 'النظام',
+          changes: {
+            الحالة: `من: ${oldStatus} → إلى: تم التحميل`,
+          },
+        });
+        await activity.save();
+
+        // =========================
+        // 📧 Email
+        // =========================
+        try {
+          const emails = await getOrderEmails(order);
+
+          await sendEmail({
+            to: emails,
+            subject: `✅ تم اكتمال تحميل الطلب ${order.orderNumber}`,
+            html: EmailTemplates.orderStatusTemplate(
+              order,
+              oldStatus,
+              'تم التحميل',
+              'النظام'
+            ),
+          });
+        } catch (emailError) {
+          console.error(
+            `❌ Email failed for order ${order.orderNumber}:`,
+            emailError.message
+          );
+        }
+
+        console.log(
+          `✅🔔📧 Order ${order.orderNumber} marked as "تم التحميل" automatically`
+        );
       }
     }
   } catch (error) {
-    console.error('خطأ في التحقق من اكتمال التحميل:', error);
+    console.error('❌ خطأ في التحقق من اكتمال التحميل:', error);
   }
 };
