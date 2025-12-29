@@ -25,4 +25,8 @@ exports.sendEmail = async ({ to, subject, html }) => {
     console.error("❌ Email error:", error);
     throw error;
   }
+<<<<<<< Updated upstream
 };
+=======
+};
+>>>>>>> Stashed changes
