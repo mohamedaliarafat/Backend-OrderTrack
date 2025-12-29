@@ -656,23 +656,31 @@ exports.createOrder = async (req, res) => {
       }
 
       const orderData = req.body;
-      
+
       // توليد رقم طلب
       orderData.orderNumber = await generateOrderNumber();
 
       // التحقق من الأوقات
-      if (!orderData.loadingDate || !orderData.loadingTime || 
-          !orderData.arrivalDate || !orderData.arrivalTime) {
+      if (
+        !orderData.loadingDate ||
+        !orderData.loadingTime ||
+        !orderData.arrivalDate ||
+        !orderData.arrivalTime
+      ) {
         return res.status(400).json({ error: 'جميع الأوقات مطلوبة' });
       }
 
       // التحقق من وقت الوصول بعد وقت التحميل
-      const loadingDateTime = new Date(`${orderData.loadingDate}T${orderData.loadingTime}`);
-      const arrivalDateTime = new Date(`${orderData.arrivalDate}T${orderData.arrivalTime}`);
-      
+      const loadingDateTime = new Date(
+        `${orderData.loadingDate}T${orderData.loadingTime}`
+      );
+      const arrivalDateTime = new Date(
+        `${orderData.arrivalDate}T${orderData.arrivalTime}`
+      );
+
       if (arrivalDateTime <= loadingDateTime) {
-        return res.status(400).json({ 
-          error: 'وقت الوصول يجب أن يكون بعد وقت التحميل' 
+        return res.status(400).json({
+          error: 'وقت الوصول يجب أن يكون بعد وقت التحميل',
         });
       }
 
@@ -681,11 +689,11 @@ exports.createOrder = async (req, res) => {
         if (req.files.companyLogo) {
           orderData.companyLogo = req.files.companyLogo[0].path;
         }
-        
+
         if (req.files.attachments) {
-          orderData.attachments = req.files.attachments.map(file => ({
+          orderData.attachments = req.files.attachments.map((file) => ({
             filename: file.originalname,
-            path: file.path
+            path: file.path,
           }));
         }
       }
@@ -708,6 +716,11 @@ exports.createOrder = async (req, res) => {
       const order = new Order(orderData);
       await order.save();
 
+      // 🔥🔥 الحل هنا: إعادة جلب الطلب مع populate 🔥🔥
+      const populatedOrder = await Order.findById(order._id)
+        .populate('customer', 'name code phone email')
+        .populate('createdBy', 'name email');
+
       // تسجيل النشاط
       const activity = new Activity({
         orderId: order._id,
@@ -718,20 +731,24 @@ exports.createOrder = async (req, res) => {
         changes: {
           'رقم الطلب': order.orderNumber,
           'المورد': order.supplierName,
-          'وقت التحميل': `${order.loadingDate.toLocaleDateString('ar-SA')} ${order.loadingTime}`,
-          'وقت الوصول': `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`
-        }
+          'وقت التحميل': `${order.loadingDate.toLocaleDateString(
+            'ar-SA'
+          )} ${order.loadingTime}`,
+          'وقت الوصول': `${order.arrivalDate.toLocaleDateString(
+            'ar-SA'
+          )} ${order.arrivalTime}`,
+        },
       });
       await activity.save();
 
-      res.status(201).json({
+      return res.status(201).json({
         message: 'تم إنشاء الطلب بنجاح',
-        order
+        order: populatedOrder, // ✅ مهم جدًا
       });
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
 
@@ -819,6 +836,198 @@ exports.getOrder = async (req, res) => {
   }
 };
 
+exports.getUpcomingOrders = async (req, res) => {
+  try {
+    const now = new Date();
+    const twoAndHalfHoursLater = new Date(now.getTime() + (2.5 * 60 * 60 * 1000));
+    
+    // البحث عن الطلبات التي موعدها خلال الساعتين ونصف القادمة
+    const orders = await Order.find({
+      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'مخصص للعميل'] }
+    }).populate('customer createdBy driver');
+    
+    const upcomingOrders = orders.filter(order => {
+      const arrivalDateTime = order.getFullArrivalDateTime();
+      return arrivalDateTime >= now && arrivalDateTime <= twoAndHalfHoursLater;
+    });
+    
+    res.json(upcomingOrders);
+  } catch (error) {
+    res.status(500).json({ error: 'حدث خطأ في جلب الطلبات القريبة' });
+  }
+};
+
+exports.getOrdersWithTimers = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+    
+    const filter = {};
+    
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+    
+    if (req.query.supplierName) {
+      filter.supplierName = new RegExp(req.query.supplierName, 'i');
+    }
+    
+    // جلب الطلبات
+    const orders = await Order.find(filter)
+      .populate('customer', 'name code')
+      .populate('driver', 'name phone vehicleNumber')
+      .sort({ arrivalDate: 1, arrivalTime: 1 }) // ترتيب حسب وقت الوصول
+      .skip(skip)
+      .limit(limit);
+    
+    const total = await Order.countDocuments(filter);
+    
+    // إضافة معلومات المؤقت لكل طلب
+    const ordersWithTimers = orders.map(order => {
+      const arrivalDateTime = order.getFullArrivalDateTime();
+      const loadingDateTime = order.getFullLoadingDateTime();
+      const now = new Date();
+      
+      const arrivalRemaining = arrivalDateTime - now;
+      const loadingRemaining = loadingDateTime - now;
+      
+      const arrivalCountdown = arrivalRemaining > 0 ? 
+        formatDuration(arrivalRemaining) : 'تأخر';
+      
+      const loadingCountdown = loadingRemaining > 0 ? 
+        formatDuration(loadingRemaining) : 'تأخر';
+      
+      // تحديد إذا كان الطلب يحتاج إشعار قبل الوصول
+      const needsArrivalNotification = 
+        arrivalRemaining > 0 && 
+        arrivalRemaining <= (2.5 * 60 * 60 * 1000) &&
+        !order.arrivalNotificationSentAt;
+      
+      return {
+        ...order.toObject(),
+        arrivalDateTime,
+        loadingDateTime,
+        arrivalRemaining,
+        loadingRemaining,
+        arrivalCountdown,
+        loadingCountdown,
+        needsArrivalNotification,
+        isApproachingArrival: arrivalRemaining > 0 && arrivalRemaining <= (2.5 * 60 * 60 * 1000),
+        isApproachingLoading: loadingRemaining > 0 && loadingRemaining <= (2.5 * 60 * 60 * 1000)
+      };
+    });
+    
+    res.json({
+      orders: ordersWithTimers,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'حدث خطأ في جلب الطلبات' });
+  }
+};
+
+// وظيفة مساعدة لتنسيق المدة
+function formatDuration(milliseconds) {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const days = Math.floor(totalSeconds / (3600 * 24));
+  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  
+  const parts = [];
+  if (days > 0) parts.push(`${days} يوم`);
+  if (hours > 0) parts.push(`${hours} ساعة`);
+  if (minutes > 0) parts.push(`${minutes} دقيقة`);
+  
+  return parts.join(' و ') || 'أقل من دقيقة';
+}
+
+exports.sendArrivalReminder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const order = await Order.findById(orderId)
+      .populate('customer createdBy');
+    
+    if (!order) {
+      return res.status(404).json({ error: 'الطلب غير موجود' });
+    }
+    
+    const User = require('../models/User');
+    const Notification = require('../models/Notification');
+    
+    // جلب المستخدمين الذين يجب إرسال إشعار لهم
+    const usersToNotify = await User.find({
+      $or: [
+        { _id: order.createdBy._id },
+        { role: { $in: ['admin', 'manager'] } }
+      ],
+      isActive: true
+    });
+    
+    if (usersToNotify.length === 0) {
+      return res.status(400).json({ error: 'لا يوجد مستخدمون للإشعار' });
+    }
+    
+    const arrivalDateTime = order.getFullArrivalDateTime();
+    const timeRemaining = formatDuration(arrivalDateTime - new Date());
+    
+    // إنشاء الإشعار
+    const notification = new Notification({
+      type: 'arrival_reminder',
+      title: 'تذكير بقرب وقت الوصول',
+      message: `الطلب رقم ${order.orderNumber} سيصل خلال ${timeRemaining}`,
+      data: {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        supplierName: order.supplierName,
+        arrivalTime: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
+        timeRemaining,
+        isManual: true
+      },
+      recipients: usersToNotify.map(user => ({ user: user._id })),
+      createdBy: req.user._id
+    });
+    
+    await notification.save();
+    
+    // تحديث وقت الإشعار في الطلب
+    order.arrivalNotificationSentAt = new Date();
+    await order.save();
+    
+    // تسجيل النشاط
+    const Activity = require('../models/Activity');
+    const activity = new Activity({
+      orderId: order._id,
+      activityType: 'إشعار',
+      description: `تم إرسال إشعار تذكير قبل الوصول للطلب رقم ${order.orderNumber}`,
+      performedBy: req.user._id,
+      performedByName: req.user.name,
+      changes: {
+        'وقت الإشعار': new Date().toLocaleString('ar-SA'),
+        'وقت الوصول المتبقي': timeRemaining
+      }
+    });
+    await activity.save();
+    
+    res.json({
+      message: 'تم إرسال الإشعار بنجاح',
+      notification,
+      timeRemaining
+    });
+    
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'حدث خطأ في إرسال الإشعار' });
+  }
+};
+
+
 // تحديث الطلب (محدود للسائق والملاحظات والمرفقات فقط)
 exports.updateOrder = async (req, res) => {
   try {
@@ -832,83 +1041,156 @@ exports.updateOrder = async (req, res) => {
         return res.status(404).json({ error: 'الطلب غير موجود' });
       }
 
-      // السماح فقط بتعديل حقول محددة
+      // السماح بتعديل حقول أكثر مرونة
       const allowedUpdates = [
         'driverName',
-        'driverPhone',
+        'driverPhone', 
         'vehicleNumber',
         'notes',
         'actualArrivalTime',
         'loadingDuration',
         'delayReason',
-        'customer'
+        'customer', // يسمح بتغيير العميل
       ];
-      
+
       const updates = {};
-      Object.keys(req.body).forEach(key => {
+      Object.keys(req.body).forEach((key) => {
         if (allowedUpdates.includes(key)) {
-          updates[key] = req.body[key];
+          // السماح بقيم فارغة لحذف البيانات (null أو '')
+          updates[key] = req.body[key] !== undefined ? req.body[key] : null;
         }
       });
 
-      // تحديث العميل إذا تم تغييره
-      if (updates.customer && updates.customer !== order.customer?.toString()) {
-        const customer = await Customer.findById(updates.customer);
-        if (!customer) {
-          return res.status(404).json({ error: 'العميل غير موجود' });
-        }
-        
-        // إذا كان الطلب في حالة "قيد الانتظار" وغير مخصص لعميل
-        if (order.status === 'قيد الانتظار' && !order.customer) {
-          updates.status = 'مخصص للعميل';
+      // 🌟 معالجة تغيير العميل 🌟
+      if ('customer' in updates) {
+        if (updates.customer === null || updates.customer === '') {
+          // حالة حذف العميل
+          updates.customer = null;
+          
+          // إذا كان الطلب في حالة "مخصص للعميل" وتم حذف العميل
+          if (order.status === 'مخصص للعميل') {
+            updates.status = 'قيد الانتظار';
+          }
+          
+        } else if (updates.customer) {
+          // حالة تغيير العميل
+          const customer = await Customer.findById(updates.customer);
+          if (!customer) {
+            return res.status(404).json({ error: 'العميل غير موجود' });
+          }
+
+          // إذا كان الطلب في حالة "قيد الانتظار" وغير مخصص لعميل
+          if (order.status === 'قيد الانتظار' && !order.customer) {
+            updates.status = 'مخصص للعميل';
+          }
         }
       }
 
-      // Handle file uploads (المرفقات فقط)
+      // 🌟 معالجة تغيير السائق 🌟
+      // السماح بحذف بيانات السائق إذا تم إرسال قيم فارغة
+      if ('driverName' in updates && (updates.driverName === null || updates.driverName === '')) {
+        updates.driverName = null;
+        // حذف رقم هاتف السائق إذا تم حذف السائق
+        updates.driverPhone = null;
+      }
+      
+      if ('driverPhone' in updates && (updates.driverPhone === null || updates.driverPhone === '')) {
+        updates.driverPhone = null;
+      }
+
+      // 🌟 معالجة الملاحظات 🌟
+      // السماح بحذف الملاحظات أو تغييرها
+      if ('notes' in updates) {
+        updates.notes = updates.notes || null;
+      }
+
+      // 🌟 معالجة رقم السيارة 🌟
+      if ('vehicleNumber' in updates && (updates.vehicleNumber === null || updates.vehicleNumber === '')) {
+        updates.vehicleNumber = null;
+      }
+
+      // معالجة المرفقات (تظل كما هي)
       if (req.files) {
-        // لا نسمح بتغيير الشعار أثناء التعديل
         if (req.files.companyLogo) {
-          return res.status(400).json({ error: 'لا يمكن تغيير شعار الشركة أثناء التعديل' });
+          return res.status(400).json({
+            error: 'لا يمكن تغيير شعار الشركة أثناء التعديل',
+          });
         }
-        
+
         if (req.files.attachments) {
-          const newAttachments = req.files.attachments.map(file => ({
+          const newAttachments = req.files.attachments.map((file) => ({
             filename: file.originalname,
-            path: file.path
+            path: file.path,
           }));
           updates.attachments = [...order.attachments, ...newAttachments];
         }
       }
 
-      // إذا تم تسجيل وقت الوصول الفعلي
-      if (updates.actualArrivalTime) {
-        // التحقق من تنسيق الوقت
-        const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        if (!timeRegex.test(updates.actualArrivalTime)) {
-          return res.status(400).json({ error: 'تنسيق الوقت غير صحيح. استخدم HH:MM' });
-        }
-        
-        // تحديث حالة الطلب إذا تم التحميل
-        if (order.status === 'جاهز للتحميل' || order.status === 'في انتظار التحميل') {
-          order.loadingCompletedAt = new Date();
-          if (!updates.status) {
-            updates.status = 'تم التحميل';
+      // 🌟 معالجة وقت الوصول الفعلي 🌟
+      if ('actualArrivalTime' in updates) {
+        if (updates.actualArrivalTime === null || updates.actualArrivalTime === '') {
+          // السماح بحذف وقت الوصول
+          updates.actualArrivalTime = null;
+        } else {
+          const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+          if (!timeRegex.test(updates.actualArrivalTime)) {
+            return res.status(400).json({
+              error: 'تنسيق الوقت غير صحيح. استخدم HH:MM',
+            });
+          }
+
+          if (
+            order.status === 'جاهز للتحميل' ||
+            order.status === 'في انتظار التحميل'
+          ) {
+            order.loadingCompletedAt = new Date();
+            if (!updates.status) {
+              updates.status = 'تم التحميل';
+            }
           }
         }
       }
 
-      // Track changes
+      // 🌟 معالجة مدة التحميل 🌟
+      if ('loadingDuration' in updates && (updates.loadingDuration === null || updates.loadingDuration === '')) {
+        updates.loadingDuration = null;
+      }
+
+      // 🌟 معالجة سبب التأخير 🌟
+      if ('delayReason' in updates && (updates.delayReason === null || updates.delayReason === '')) {
+        updates.delayReason = null;
+      }
+
+      // حفظ البيانات القديمة لتتبع التغييرات
       const oldData = { ...order.toObject() };
-      
+
       // تحديث الطلب
       Object.assign(order, updates);
       await order.save();
 
-      // Log changes
+      // 🌟 تسجيل التعديلات 🌟
       const changes = {};
-      Object.keys(updates).forEach(key => {
-        if (key !== 'attachments' && oldData[key] !== updates[key]) {
-          changes[key] = `من: ${oldData[key] || 'غير محدد'} → إلى: ${updates[key]}`;
+      Object.keys(updates).forEach((key) => {
+        // استبعاد المرفقات من سجل التغييرات
+        if (key !== 'attachments') {
+          const oldValue = oldData[key];
+          const newValue = updates[key];
+          
+          // تسجيل التغيير فقط إذا اختلفت القيمة
+          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            let oldValueStr = 'غير محدد';
+            let newValueStr = 'غير محدد';
+            
+            if (oldValue !== null && oldValue !== undefined && oldValue !== '') {
+              oldValueStr = oldValue.toString();
+            }
+            
+            if (newValue !== null && newValue !== undefined && newValue !== '') {
+              newValueStr = newValue.toString();
+            }
+            
+            changes[key] = `من: ${oldValueStr} → إلى: ${newValueStr}`;
+          }
         }
       });
 
@@ -919,22 +1201,29 @@ exports.updateOrder = async (req, res) => {
           description: `تم تعديل الطلب رقم ${order.orderNumber}`,
           performedBy: req.user._id,
           performedByName: req.user.name,
-          changes
+          changes,
         });
         await activity.save();
       }
 
-      res.json({
+      // جلب البيانات المحدثة مع العلاقات
+      const populatedOrder = await Order.findById(order._id)
+        .populate('customer', 'name code phone email')
+        .populate('createdBy', 'name email');
+
+      return res.json({
         message: 'تم تحديث الطلب بنجاح',
-        order,
-        allowedFields: allowedUpdates
+        order: populatedOrder,
+        allowedFields: allowedUpdates,
+        changes: Object.keys(changes).length > 0 ? changes : null,
       });
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error('Error updating order:', error);
+    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // تحديث حالة الطلب (للإداريين فقط)
 exports.updateOrderStatus = async (req, res) => {

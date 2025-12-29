@@ -13,6 +13,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const customerRoutes = require('./routes/customerRoutes'); 
 const notificationRoutes = require('./routes/notificationRoutes');
+const driverRoutes = require('./routes/driverRoutes');
 
 // Initialize Express app
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/customers', customerRoutes); // جديد
 app.use('/api/notifications', notificationRoutes); // جديد
+app.use('/api/drivers', driverRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

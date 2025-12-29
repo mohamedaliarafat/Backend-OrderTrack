@@ -129,4 +129,57 @@ router.get('/urgent/loading', async (req, res) => {
   }
 });
 
+// جلب الطلبات مع المؤقتات
+router.get('/with-timers', orderController.getOrdersWithTimers);
+
+// جلب الطلبات القريبة من وقتها
+router.get('/upcoming/orders', orderController.getUpcomingOrders);
+
+// إرسال إشعار يدوي لطلب معين
+router.post('/:orderId/send-reminder', orderController.sendArrivalReminder);
+
+// إحصاءات المؤقتات
+router.get('/stats/timers', async (req, res) => {
+  try {
+    const now = new Date();
+    const twoAndHalfHoursLater = new Date(now.getTime() + (2.5 * 60 * 60 * 1000));
+    
+    const allOrders = await Order.find({
+      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'مخصص للعميل'] }
+    });
+    
+    const stats = {
+      total: allOrders.length,
+      approachingArrival: 0,
+      approachingLoading: 0,
+      needsNotification: 0,
+      overdue: 0
+    };
+    
+    allOrders.forEach(order => {
+      const arrivalDateTime = order.getFullArrivalDateTime();
+      const loadingDateTime = order.getFullLoadingDateTime();
+      
+      if (arrivalDateTime > now && arrivalDateTime <= twoAndHalfHoursLater) {
+        stats.approachingArrival++;
+        if (!order.arrivalNotificationSentAt) {
+          stats.needsNotification++;
+        }
+      }
+      
+      if (loadingDateTime > now && loadingDateTime <= twoAndHalfHoursLater) {
+        stats.approachingLoading++;
+      }
+      
+      if (loadingDateTime < now && order.status !== 'تم التحميل') {
+        stats.overdue++;
+      }
+    });
+    
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'حدث خطأ في جلب إحصاءات المؤقتات' });
+  }
+});
+
 module.exports = router;
