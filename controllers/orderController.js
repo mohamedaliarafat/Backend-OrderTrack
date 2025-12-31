@@ -234,12 +234,10 @@ exports.createOrder = async (req, res) => {
       await order.save();
 
       const populatedOrder = await Order.findById(order._id)
-
         .populate('customer', 'name code phone city area')
         .populate('supplier', 'name company city area')
         .populate('createdBy', 'name email')
-        .populate('driver', 'name phone vehicleNumber');
-
+        .populate('driver', 'name phone vehicleNumber')
         .populate('customer', 'name code phone email')
         .populate('createdBy', 'name email');
 
