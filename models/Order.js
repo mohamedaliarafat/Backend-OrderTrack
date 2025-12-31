@@ -104,11 +104,22 @@ customer: {
     type: String
   },
 
-  requestType: {
+ requestType: {
   type: String,
   enum: ['شراء', 'نقل'],
-  default: 'شراء',
+  required: function () {
+    return this.orderSource === 'عميل';
+  },
+  default: function () {
+    // لو طلب عميل → الافتراضي شراء
+    if (this.orderSource === 'عميل') {
+      return 'شراء';
+    }
+    // لو مورد → لا نحط قيمة
+    return undefined;
+  }
 },
+
   
   // ============================================
   // 📍 معلومات الموقع
