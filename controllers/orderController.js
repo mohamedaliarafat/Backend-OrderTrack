@@ -278,7 +278,7 @@ exports.createOrder = async (req, res) => {
         // لا نوقف العملية لو الإيميل فشل
         console.error('❌ Email sending failed:', emailError.message);
       }
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
 
       return res.status(201).json({
         message:
