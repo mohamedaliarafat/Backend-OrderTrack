@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String
   },
+
+  lastLoginAt: { type: Date },
+lastWelcomeEmailAt: { type: Date },
+
   createdAt: {
     type: Date,
     default: Date.now

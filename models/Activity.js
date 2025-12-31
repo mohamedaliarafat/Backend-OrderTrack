@@ -6,28 +6,45 @@ const activitySchema = new mongoose.Schema({
     ref: 'Order',
     required: false,
   },
+
   activityType: {
     type: String,
-    enum: ['إنشاء', 'تعديل', 'حذف', 'تغيير حالة', 'إضافة ملاحظة', 'رفع ملف'],
+    enum: [
+      'إنشاء',
+      'تعديل',
+      'حذف',
+      'تغيير حالة',
+      'إضافة ملاحظة',
+      'رفع ملف',
+      'دمج' // ✅ أضفناها
+    ],
     required: true
   },
+
   description: {
     type: String,
     required: true
   },
+
+  // 👇 لم يعد إجباري
   performedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false
   },
+
+  // 👇 نعتمد عليه
   performedByName: {
     type: String,
-    required: true
+    required: true,
+    default: 'النظام'
   },
+
   changes: {
     type: Map,
     of: String
   },
+
   createdAt: {
     type: Date,
     default: Date.now

@@ -31,4 +31,11 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-module.exports = { authMiddleware, adminMiddleware };
+const managerMiddleware = (req, res, next) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+    return res.status(403).json({ error: 'غير مسموح بالوصول' });
+  }
+  next();
+};
+
+module.exports = { authMiddleware, adminMiddleware, managerMiddleware };

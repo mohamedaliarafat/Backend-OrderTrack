@@ -48,7 +48,7 @@ exports.getActivities = async (req, res) => {
 // Add manual activity
 exports.addActivity = async (req, res) => {
   try {
-    const { orderId, activityType, description } = req.body;
+    const { orderId, activityType, description, performedByName } = req.body;
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -59,8 +59,8 @@ exports.addActivity = async (req, res) => {
       orderId,
       activityType,
       description,
-      performedBy: req.user._id,
-      performedByName: req.user.name
+      performedBy: req.user?._id || null, // ✅ آمن
+      performedByName: performedByName || req.user?.name || 'النظام'
     });
 
     await activity.save();
@@ -70,6 +70,7 @@ exports.addActivity = async (req, res) => {
       activity
     });
   } catch (error) {
+    console.error('❌ addActivity error:', error);
     res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };

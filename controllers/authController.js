@@ -2,6 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 
+
 const generateToken = (userId) => {
   return jwt.sign(
     { userId },

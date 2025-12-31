@@ -14,6 +14,10 @@ const activityRoutes = require('./routes/activityRoutes');
 const customerRoutes = require('./routes/customerRoutes'); 
 const notificationRoutes = require('./routes/notificationRoutes');
 const driverRoutes = require('./routes/driverRoutes');
+const supplierRoutes = require('./routes/supplierRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const deviceRoutes = require('./routes/deviceRoutes');
+
 
 // Initialize Express app
 const app = express();
@@ -36,9 +40,12 @@ mongoose.connect(process.env.MONGODB_URL || 'mongodb+srv://nasser66:Qwert1557@cl
 app.use('/api/auth', authRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/activities', activityRoutes);
-app.use('/api/customers', customerRoutes); // جديد
-app.use('/api/notifications', notificationRoutes); // جديد
+app.use('/api/customers', customerRoutes); 
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/drivers', driverRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/devices', deviceRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

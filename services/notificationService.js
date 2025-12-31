@@ -1,222 +1,156 @@
-const notificationController = require('../controllers/notificationController');
-const Order = require('../models/Order');
-const User = require('../models/User');
+const Notification = require('../models/Notification');
+const Device = require('../models/Device');
+const RealtimeService = require('./realtime.service');
+const { initFirebase } = require('../config/firebase');
+const { sendEmail } = require('../utils/emailService'); // Resend
+const templates = require('../utils/emailTemplates');   // عندك
 
-// إنشاء إشعارات تلقائية عند الأحداث
-
-// 1. عند إنشاء طلب جديد
-exports.notifyOrderCreated = async (order, createdBy) => {
-  const adminUsers = await User.find({
-    role: { $in: ['admin', 'manager'] },
-    isActive: true
-  }).select('_id');
-
-  await notificationController.createNotification({
-    type: 'order_created',
-    title: 'طلب جديد',
-    message: `تم إنشاء طلب جديد برقم ${order.orderNumber}`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      supplierName: order.supplierName,
-      loadingTime: `${order.loadingDate.toLocaleDateString('ar-SA')} ${order.loadingTime}`,
-      arrivalTime: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`
-    },
-    recipients: adminUsers.map(user => user._id),
-    priority: 'medium',
-    createdBy: createdBy._id,
-    orderId: order._id
-  });
-};
-
-// 2. عند تحديث الطلب
-exports.notifyOrderUpdated = async (order, updatedBy, changes) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'order_updated',
-    title: 'تم تحديث الطلب',
-    message: `تم تحديث الطلب رقم ${order.orderNumber}`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      changes: changes,
-      updatedBy: updatedBy.name
-    },
-    recipients,
-    priority: 'low',
-    createdBy: updatedBy._id,
-    orderId: order._id
-  });
-};
-
-// 3. عند تعيين طلب للعميل
-exports.notifyOrderAssigned = async (order, customer, assignedBy) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'order_assigned',
-    title: 'تم تعيين طلب للعميل',
-    message: `تم تعيين الطلب رقم ${order.orderNumber} للعميل ${customer.name}`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      customerName: customer.name,
-      customerCode: customer.code
-    },
-    recipients,
-    priority: 'high',
-    createdBy: assignedBy._id,
-    orderId: order._id
-  });
-};
-
-// 4. عند تأخر الطلب
-exports.notifyOrderOverdue = async (order) => {
-  const adminUsers = await User.find({
-    role: { $in: ['admin', 'manager'] },
-    isActive: true
-  }).select('_id');
-
-  await notificationController.createNotification({
-    type: 'order_overdue',
-    title: 'طلب متأخر',
-    message: `الطلب رقم ${order.orderNumber} متأخر ولم يتم تعيينه للعميل`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      overdueSince: order.createdAt,
-      supplierName: order.supplierName
-    },
-    recipients: adminUsers.map(user => user._id),
-    priority: 'urgent',
-    orderId: order._id
-  });
-};
-
-// 5. تذكير قبل التحميل
-exports.notifyLoadingReminder = async (order, minutesBefore) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'loading_reminder',
-    title: 'تذكير بموعد التحميل',
-    message: `موعد تحميل الطلب رقم ${order.orderNumber} بعد ${minutesBefore} دقيقة`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      loadingTime: `${order.loadingDate.toLocaleDateString('ar-SA')} ${order.loadingTime}`,
-      minutesLeft: minutesBefore
-    },
-    recipients,
-    priority: 'high',
-    orderId: order._id
-  });
-};
-
-// 6. تذكير قبل الوصول
-exports.notifyArrivalReminder = async (order, hoursBefore) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'arrival_reminder',
-    title: 'تذكير بموعد الوصول',
-    message: `الطلب رقم ${order.orderNumber} سيصل بعد ${hoursBefore} ساعة`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      arrivalTime: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
-      hoursLeft: hoursBefore
-    },
-    recipients,
-    priority: 'medium',
-    orderId: order._id
-  });
-};
-
-// 7. عند اكتمال التحميل
-exports.notifyLoadingCompleted = async (order, completedBy) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'loading_completed',
-    title: 'تم اكتمال التحميل',
-    message: `تم اكتمال تحميل الطلب رقم ${order.orderNumber}`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      completedAt: new Date(),
-      completedBy: completedBy.name
-    },
-    recipients,
-    priority: 'medium',
-    createdBy: completedBy._id,
-    orderId: order._id
-  });
-};
-
-// 8. عند تغيير حالة الطلب
-exports.notifyStatusChanged = async (order, oldStatus, newStatus, changedBy) => {
-  const recipients = await getOrderRecipients(order);
-  
-  await notificationController.createNotification({
-    type: 'status_changed',
-    title: 'تغيير حالة الطلب',
-    message: `تم تغيير حالة الطلب ${order.orderNumber} من ${oldStatus} إلى ${newStatus}`,
-    data: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      oldStatus,
-      newStatus,
-      changedBy: changedBy.name
-    },
-    recipients,
-    priority: 'medium',
-    createdBy: changedBy._id,
-    orderId: order._id
-  });
-};
-
-// دالة مساعدة للحصول على المستلمين
-const getOrderRecipients = async (order) => {
-  const recipients = new Set();
-  
-  // إضافة المنشئ
-  if (order.createdBy) {
-    recipients.add(order.createdBy.toString());
-  }
-  
-  // إضافة الإداريين
-  const adminUsers = await User.find({
-    role: { $in: ['admin', 'manager'] },
-    isActive: true
-  }).select('_id');
-  
-  adminUsers.forEach(user => recipients.add(user._id.toString()));
-  
-  // إضافة المستخدمين المشتركين في الطلب
-  // يمكنك توسيع هذه الدالة حسب الحاجة
-  
-  return Array.from(recipients);
-};
-
-// إشعارات النظام
-exports.notifySystemAlert = async (title, message, priority = 'high') => {
-  const adminUsers = await User.find({
-    role: { $in: ['admin', 'manager'] },
-    isActive: true
-  }).select('_id');
-
-  await notificationController.createNotification({
-    type: 'system_alert',
+class NotificationService {
+  static async send({
+    type,
     title,
     message,
-    data: {
-      alertTime: new Date(),
-      severity: priority
-    },
-    recipients: adminUsers.map(user => user._id),
-    priority,
-    createdAt: new Date()
-  });
-};
+    data = {},
+    recipients = [],
+    priority = 'medium',
+    createdBy,
+    orderId,
+    platforms = ['web', 'android', 'ios', 'desktop'],
+    channels = ['in_app', 'push', 'email'], // خليها حسب الحدث
+  }) {
+    // 1) create DB notification
+    const notification = await Notification.create({
+      type,
+      title,
+      message,
+      data,
+      recipients: recipients.map(user => ({ user })),
+      priority,
+      createdBy,
+      orderId,
+      platforms: platforms.filter(p => p !== 'desktop'), // push للـ desktop لا
+      channels: channels.filter(Boolean),
+      sendStatus: 'pending'
+    });
+
+    // 2) realtime (web/desktop)
+    for (const userId of recipients) {
+      RealtimeService.sendToUser(userId, {
+        type: 'notification',
+        data: {
+          id: notification._id,
+          type,
+          title,
+          message,
+          priority,
+          orderId,
+          createdAt: notification.createdAt,
+        }
+      });
+    }
+
+    // 3) Push via FCM
+    if (channels.includes('push')) {
+      await this._sendPushFCM({
+        notificationId: notification._id,
+        title,
+        message,
+        data,
+        recipients,
+        platforms,
+      });
+    }
+
+    // 4) Email
+    if (channels.includes('email')) {
+      await this._sendEmail({
+        type,
+        title,
+        message,
+        data,
+        recipients,
+      });
+    }
+
+    notification.sendStatus = 'sent';
+    await notification.save();
+
+    return notification;
+  }
+
+  static async _sendPushFCM({ notificationId, title, message, data, recipients, platforms }) {
+    const admin = initFirebase();
+    if (!admin) return;
+
+    // desktop excluded by design
+    const pushPlatforms = platforms.filter(p => p !== 'desktop');
+
+    const devices = await Device.find({
+      user: { $in: recipients },
+      platform: { $in: pushPlatforms },
+      isActive: true
+    }).select('token platform user');
+
+    const tokens = [...new Set(devices.map(d => d.token).filter(Boolean))];
+    if (!tokens.length) return;
+
+    // FCM data must be string values
+    const payloadData = {};
+    Object.entries({ ...data, notificationId: String(notificationId) }).forEach(([k, v]) => {
+      payloadData[k] = v == null ? '' : String(v);
+    });
+
+    // multicast (limit 500 tokens)
+    const chunks = [];
+    for (let i = 0; i < tokens.length; i += 500) chunks.push(tokens.slice(i, i + 500));
+
+    for (const chunk of chunks) {
+      try {
+        const resp = await admin.messaging().sendEachForMulticast({
+          tokens: chunk,
+          notification: { title, body: message },
+          data: payloadData,
+        });
+
+        // لو فيه توكنات فاشلة: عطّلها
+        resp.responses.forEach(async (r, idx) => {
+          if (!r.success) {
+            const badToken = chunk[idx];
+            const errCode = r.error?.code || '';
+            if (errCode.includes('registration-token-not-registered')) {
+              await Device.updateOne({ token: badToken }, { $set: { isActive: false } });
+            }
+          }
+        });
+      } catch (e) {
+        console.error('❌ FCM send error:', e?.message || e);
+      }
+    }
+  }
+
+  static async _sendEmail({ type, title, message, data, recipients }) {
+    // هنا أنت عندك util getOrderRecipients للإيميل
+    // الأفضل: نجيب إيميلات المستخدمين مباشرة من User
+    const User = require('../models/User');
+    const users = await User.find({ _id: { $in: recipients } }).select('email name');
+    const emails = users.map(u => u.email).filter(Boolean);
+
+    if (!emails.length) return;
+
+    // استخدم templates لو تحب
+    const html = `
+      <div style="font-family:Arial;padding:20px">
+        <h2>${title}</h2>
+        <p>${message}</p>
+      </div>
+    `;
+
+    try {
+      await sendEmail({ to: emails, subject: title, html });
+    } catch (e) {
+      console.error('❌ Email send error:', e?.message || e);
+    }
+  }
+}
+
+module.exports = NotificationService;
