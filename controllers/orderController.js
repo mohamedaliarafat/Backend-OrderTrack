@@ -234,10 +234,51 @@ exports.createOrder = async (req, res) => {
       await order.save();
 
       const populatedOrder = await Order.findById(order._id)
+<<<<<<< HEAD
         .populate('customer', 'name code phone city area')
         .populate('supplier', 'name company city area')
         .populate('createdBy', 'name email')
         .populate('driver', 'name phone vehicleNumber');
+=======
+        .populate('customer', 'name code phone email')
+        .populate('createdBy', 'name email');
+
+      // تسجيل النشاط
+      const activity = new Activity({
+        orderId: order._id,
+        activityType: 'إنشاء',
+        description: `تم إنشاء طلب جديد برقم ${order.orderNumber}`,
+        performedBy: req.user._id,
+        performedByName: req.user.name,
+        changes: {
+          'رقم الطلب': order.orderNumber,
+          'المورد': order.supplierName,
+          'وقت التحميل': `${order.loadingDate.toLocaleDateString('ar-SA')} ${order.loadingTime}`,
+          'وقت الوصول': `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
+        },
+      });
+      await activity.save();
+
+      // =========================
+      // 📧 إرسال الإيميل
+      // =========================
+      try {
+        const emails = await getOrderEmails(populatedOrder);
+
+       if (!emails || emails.length === 0) {
+          console.log('⚠️ No valid emails found for order creation');
+        } else {
+          await sendEmail({
+            to: emails,
+            subject: `📦 تم إنشاء طلب جديد - ${order.orderNumber}`,
+            html: EmailTemplates.orderCreatedTemplate(populatedOrder),
+          });
+        }
+      } catch (emailError) {
+        // لا نوقف العملية لو الإيميل فشل
+        console.error('❌ Email sending failed:', emailError.message);
+      }
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
 
       return res.status(201).json({
         message:
@@ -445,15 +486,29 @@ exports.getUpcomingOrders = async (req, res) => {
 
             const emails = await getOrderEmails(order);
 
+<<<<<<< HEAD
             if (!emails || emails.length === 0) {
+=======
+           if (!emails || emails.length === 0) {
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
               console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
             } else {
               await sendEmail({
                 to: emails,
                 subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+<<<<<<< HEAD
                 html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
               });
             }
+=======
+                html: EmailTemplates.arrivalReminderTemplate(
+                  order,
+                  timeRemaining
+                ),
+              });
+            }
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
 
             // تحديث وقت الإرسال
             order.arrivalEmailSentAt = new Date();
@@ -537,6 +592,7 @@ exports.getOrdersWithTimers = async (req, res) => {
           const emails = await getOrderEmails(order);
 
           if (!emails || emails.length === 0) {
+<<<<<<< HEAD
             console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
           } else {
             await sendEmail({
@@ -545,6 +601,20 @@ exports.getOrdersWithTimers = async (req, res) => {
               html: EmailTemplates.arrivalReminderTemplate(order, formatDuration(arrivalRemaining)),
             });
           }
+=======
+              console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+            } else {
+              await sendEmail({
+                to: emails,
+                subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
+                html: EmailTemplates.arrivalReminderTemplate(
+                  order,
+                  formatDuration(arrivalRemaining)
+                ),
+              });
+            }
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
 
           order.arrivalEmailSentAt = new Date();
           await order.save();
@@ -645,6 +715,7 @@ exports.sendArrivalReminder = async (req, res) => {
 
     await notification.save();
 
+<<<<<<< HEAD
     // إرسال الإيميل
     try {
       const emails = await getOrderEmails(order);
@@ -661,6 +732,30 @@ exports.sendArrivalReminder = async (req, res) => {
     } catch (emailError) {
       console.error(`❌ Failed to send arrival reminder email for order ${order.orderNumber}:`, emailError.message);
     }
+=======
+    // =========================
+    // 📧 إرسال الإيميل لكل المستخدمين
+    // =========================
+   try {
+  const emails = await getOrderEmails(order);
+
+  if (!emails || emails.length === 0) {
+    console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+  } else {
+    await sendEmail({
+      to: emails,
+      subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+      html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
+    });
+  }
+} catch (emailError) {
+  console.error(
+    `❌ Failed to send arrival reminder email for order ${order.orderNumber}:`,
+    emailError.message
+  );
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
 
     // تحديث حالة الإرسال
     order.arrivalNotificationSentAt = new Date();
@@ -866,6 +961,7 @@ exports.updateOrder = async (req, res) => {
 
           const emails = await getOrderEmails(populatedForEmail);
 
+<<<<<<< HEAD
           if (!emails || emails.length === 0) {
             console.log(`⚠️ No valid emails for order update - order ${order.orderNumber}`);
           } else {
@@ -875,6 +971,22 @@ exports.updateOrder = async (req, res) => {
               html: EmailTemplates.orderUpdatedTemplate(populatedForEmail, changes, req.user.name),
             });
           }
+=======
+         if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for order update - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `✏️ تحديث على الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderUpdatedTemplate(
+      populatedForEmail,
+      changes,
+      req.user.name
+    ),
+  });
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
         } catch (emailError) {
           console.error('❌ Failed to send update email:', emailError.message);
         }
@@ -983,6 +1095,7 @@ exports.updateOrderStatus = async (req, res) => {
     try {
       const emails = await getOrderEmails(order);
 
+<<<<<<< HEAD
       if (!emails || emails.length === 0) {
         console.log(`⚠️ No valid emails for order status update - order ${order.orderNumber}`);
       } else {
@@ -992,6 +1105,25 @@ exports.updateOrderStatus = async (req, res) => {
           html: EmailTemplates.orderStatusTemplate(order, oldStatus, status, req.user.name, reason),
         });
       }
+=======
+      const emails = await getOrderEmails(populatedForEmail);
+
+     if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for order status update - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `🔄 تحديث حالة الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderStatusTemplate(
+      populatedForEmail,
+      oldStatus,
+      status,
+      req.user.name
+    ),
+  });
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
     } catch (emailError) {
       console.error('❌ Failed to send order status email:', emailError.message);
     }
@@ -1279,6 +1411,7 @@ exports.deleteOrder = async (req, res) => {
       const emails = await getOrderEmails(order);
 
       if (!emails || emails.length === 0) {
+<<<<<<< HEAD
         console.log(`⚠️ No valid emails for order deletion - order ${order.orderNumber}`);
       } else {
         await sendEmail({
@@ -1286,6 +1419,37 @@ exports.deleteOrder = async (req, res) => {
           subject: `🗑️ تم حذف الطلب ${order.orderNumber}`,
           html: EmailTemplates.orderDeletedTemplate(order, req.user.name),
         });
+=======
+  console.log(`⚠️ No valid emails for order deletion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `🗑️ تم حذف الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderDeletedTemplate(
+      order,
+      req.user.name
+    ),
+  });
+}
+
+    } catch (emailError) {
+      console.error(
+        '❌ Failed to send delete order email:',
+        emailError.message
+      );
+    }
+
+    // =========================
+    // 🗑️ حذف الملفات المرتبطة
+    // =========================
+    if (order.companyLogo && fs.existsSync(order.companyLogo)) {
+      fs.unlinkSync(order.companyLogo);
+    }
+
+    order.attachments.forEach((attachment) => {
+      if (fs.existsSync(attachment.path)) {
+        fs.unlinkSync(attachment.path);
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
       }
     } catch (emailError) {
       console.error('❌ Failed to send delete order email:', emailError.message);
@@ -1384,6 +1548,7 @@ exports.deleteAttachment = async (req, res) => {
     try {
       const emails = await getOrderEmails(order);
 
+<<<<<<< HEAD
       if (!emails || emails.length === 0) {
         console.log(`⚠️ No valid emails for attachment deletion - order ${order.orderNumber}`);
       } else {
@@ -1393,6 +1558,22 @@ exports.deleteAttachment = async (req, res) => {
           html: EmailTemplates.attachmentDeletedTemplate(order, attachment.filename, req.user.name, docType),
         });
       }
+=======
+     if (!emails || emails.length === 0) {
+  console.log(`⚠️ No valid emails for attachment deletion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `📎 حذف مرفق من الطلب ${order.orderNumber}`,
+    html: EmailTemplates.attachmentDeletedTemplate(
+      order,
+      attachment.filename,
+      req.user.name
+    ),
+  });
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
     } catch (emailError) {
       console.error('❌ Failed to send attachment delete email:', emailError.message);
     }
@@ -1488,6 +1669,7 @@ exports.checkArrivalNotifications = async () => {
           const emails = await getOrderEmails(order);
 
           if (!emails || emails.length === 0) {
+<<<<<<< HEAD
             console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
           } else {
             await sendEmail({
@@ -1496,6 +1678,20 @@ exports.checkArrivalNotifications = async () => {
               html: EmailTemplates.arrivalReminderTemplate(order, formatDuration(timeRemainingMs)),
             });
           }
+=======
+  console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+    html: EmailTemplates.arrivalReminderTemplate(
+      order,
+      formatDuration(timeRemainingMs)
+    ),
+  });
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
         } catch (emailError) {
           console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
         }
@@ -1591,6 +1787,7 @@ exports.checkCompletedLoading = async () => {
           const emails = await getOrderEmails(order);
 
           if (!emails || emails.length === 0) {
+<<<<<<< HEAD
             console.log(`⚠️ No valid emails for loading completion - order ${order.orderNumber}`);
           } else {
             await sendEmail({
@@ -1599,6 +1796,22 @@ exports.checkCompletedLoading = async () => {
               html: EmailTemplates.orderStatusTemplate(order, oldStatus, 'تم التحميل', 'النظام'),
             });
           }
+=======
+  console.log(`⚠️ No valid emails for loading completion - order ${order.orderNumber}`);
+} else {
+  await sendEmail({
+    to: emails,
+    subject: `✅ تم اكتمال تحميل الطلب ${order.orderNumber}`,
+    html: EmailTemplates.orderStatusTemplate(
+      order,
+      oldStatus,
+      'تم التحميل',
+      'النظام'
+    ),
+  });
+}
+
+>>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
         } catch (emailError) {
           console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
         }
