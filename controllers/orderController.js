@@ -754,7 +754,7 @@ exports.sendArrivalReminder = async (req, res) => {
   );
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
 
     // تحديث حالة الإرسال
     order.arrivalNotificationSentAt = new Date();
@@ -984,7 +984,7 @@ exports.updateOrder = async (req, res) => {
   });
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
         } catch (emailError) {
           console.error('❌ Failed to send update email:', emailError.message);
         }
@@ -1121,7 +1121,7 @@ exports.updateOrderStatus = async (req, res) => {
   });
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
     } catch (emailError) {
       console.error('❌ Failed to send order status email:', emailError.message);
     }
@@ -1447,7 +1447,7 @@ exports.deleteOrder = async (req, res) => {
     order.attachments.forEach((attachment) => {
       if (fs.existsSync(attachment.path)) {
         fs.unlinkSync(attachment.path);
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
       }
     } catch (emailError) {
       console.error('❌ Failed to send delete order email:', emailError.message);
@@ -1571,7 +1571,7 @@ exports.deleteAttachment = async (req, res) => {
   });
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
     } catch (emailError) {
       console.error('❌ Failed to send attachment delete email:', emailError.message);
     }
@@ -1689,7 +1689,7 @@ exports.checkArrivalNotifications = async () => {
   });
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
         } catch (emailError) {
           console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
         }
@@ -1809,7 +1809,7 @@ exports.checkCompletedLoading = async () => {
   });
 }
 
->>>>>>> 7728126dac41333cffeba291d43dfc9409179aa6
+
         } catch (emailError) {
           console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
         }
