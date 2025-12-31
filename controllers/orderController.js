@@ -92,18 +92,6 @@ exports.createOrder = async (req, res) => {
       delete orderData.orderNumber;
 
       // ==================================================
-      // ✅ نوع العملية (شراء | نقل)
-      // ==================================================
-      const allowedRequestTypes = ['شراء', 'نقل'];
-      orderData.requestType = orderData.requestType || 'شراء';
-
-      if (!allowedRequestTypes.includes(orderData.requestType)) {
-        return res.status(400).json({
-          error: 'نوع العملية غير صحيح (يجب أن يكون شراء أو نقل)',
-        });
-      }
-
-      // ==================================================
       // 🧭 تحديد مصدر الطلب
       // ==================================================
       orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
@@ -118,9 +106,32 @@ exports.createOrder = async (req, res) => {
       }
 
       // ==================================================
-      // 🚚 شرط النقل: لازم سائق
+      // ✅ نوع العملية (شراء | نقل) — للعملاء فقط
       // ==================================================
-      if (orderData.requestType === 'نقل' && !orderData.driver) {
+      const allowedRequestTypes = ['شراء', 'نقل'];
+
+      if (orderData.orderSource === 'عميل') {
+        // افتراضي شراء
+        orderData.requestType = orderData.requestType || 'شراء';
+
+        if (!allowedRequestTypes.includes(orderData.requestType)) {
+          return res.status(400).json({
+            error: 'نوع العملية غير صحيح (يجب أن يكون شراء أو نقل)',
+          });
+        }
+      } else {
+        // طلب مورد → ممنوع وجود requestType
+        delete orderData.requestType;
+      }
+
+      // ==================================================
+      // 🚚 شرط النقل: سائق (طلب عميل + نقل فقط)
+      // ==================================================
+      if (
+        orderData.orderSource === 'عميل' &&
+        orderData.requestType === 'نقل' &&
+        !orderData.driver
+      ) {
         return res.status(400).json({
           error: 'طلبات النقل تتطلب تعيين سائق',
         });
@@ -252,6 +263,7 @@ exports.createOrder = async (req, res) => {
     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 
 
