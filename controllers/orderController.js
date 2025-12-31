@@ -599,19 +599,7 @@ exports.getOrdersWithTimers = async (req, res) => {
             });
           }
 
-              console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
-            } else {
-              await sendEmail({
-                to: emails,
-                subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
-                html: EmailTemplates.arrivalReminderTemplate(
-                  order,
-                  formatDuration(arrivalRemaining)
-                ),
-              });
-            }
-
-
+            
 
           order.arrivalEmailSentAt = new Date();
           await order.save();
