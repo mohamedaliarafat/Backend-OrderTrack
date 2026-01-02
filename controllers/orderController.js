@@ -1538,9 +1538,9 @@ exports.checkCompletedLoading = async () => {
       status: { $in: ['في انتظار التحميل', 'جاهز للتحميل'] },
       loadingCompletedAt: { $exists: false },
     })
-    .populate('customer', 'name email')
-    .populate('supplier', 'name email contactPerson')
-    .populate('createdBy', 'name email');
+      .populate('customer', 'name email')
+      .populate('supplier', 'name email contactPerson')
+      .populate('createdBy', 'name email');
 
     const Notification = require('../models/Notification');
     const Activity = require('../models/Activity');
@@ -1549,15 +1549,16 @@ exports.checkCompletedLoading = async () => {
     for (const order of orders) {
       const loadingDateTime = order.getFullLoadingDateTime();
 
-      // بعد ساعة من وقت التحميل
-      const oneHourAfterLoading = new Date(loadingDateTime);
-      oneHourAfterLoading.setHours(oneHourAfterLoading.getHours() + 1);
-
-      if (now >= oneHourAfterLoading) {
+      /**
+       * ✅ التعديل المهم هنا
+       * ❌ حذفنا منطق (بعد ساعة)
+       * ✅ نعتمد فقط على وقت التحميل الفعلي
+       */
+      if (now >= loadingDateTime) {
         const oldStatus = order.status;
 
-        // تحديث حالة الطلب
-        order.status = 'تم التحميل';
+        // ✅ تحديث حالة الطلب (جاهز للتنفيذ بدل تم التحميل)
+        order.status = 'جاهز للتنفيذ';
         order.loadingCompletedAt = now;
         await order.save();
 
@@ -1570,14 +1571,14 @@ exports.checkCompletedLoading = async () => {
         // Notification
         const notification = new Notification({
           type: 'loading_completed',
-          title: 'اكتمل التحميل تلقائيًا',
-          message: `تم تحديث حالة الطلب ${order.orderNumber} إلى "تم التحميل" تلقائيًا`,
+          title: 'جاهز للتنفيذ',
+          message: `تم تحديث حالة الطلب ${order.orderNumber} إلى "جاهز للتنفيذ" بعد انتهاء وقت التحميل`,
           data: {
             orderId: order._id,
             orderNumber: order.orderNumber,
             customerName: order.customerName,
             oldStatus,
-            newStatus: 'تم التحميل',
+            newStatus: 'جاهز للتنفيذ',
             auto: true,
           },
           recipients: adminUsers.map((u) => ({ user: u._id })),
@@ -1589,11 +1590,11 @@ exports.checkCompletedLoading = async () => {
         const activity = new Activity({
           orderId: order._id,
           activityType: 'تغيير حالة',
-          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التحميل"`,
+          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "جاهز للتنفيذ" بعد انتهاء وقت التحميل`,
           performedBy: null,
           performedByName: 'النظام',
           changes: {
-            الحالة: `من: ${oldStatus} → إلى: تم التحميل`,
+            الحالة: `من: ${oldStatus} → إلى: جاهز للتنفيذ`,
           },
         });
         await activity.save();
@@ -1603,19 +1604,31 @@ exports.checkCompletedLoading = async () => {
           const emails = await getOrderEmails(order);
 
           if (!emails || emails.length === 0) {
-            console.log(`⚠️ No valid emails for loading completion - order ${order.orderNumber}`);
+            console.log(
+              `⚠️ No valid emails for loading completion - order ${order.orderNumber}`
+            );
           } else {
             await sendEmail({
               to: emails,
-              subject: `✅ تم اكتمال تحميل الطلب ${order.orderNumber}`,
-              html: EmailTemplates.orderStatusTemplate(order, oldStatus, 'تم التحميل', 'النظام'),
+              subject: `🚚 الطلب ${order.orderNumber} جاهز للتنفيذ`,
+              html: EmailTemplates.orderStatusTemplate(
+                order,
+                oldStatus,
+                'جاهز للتنفيذ',
+                'النظام'
+              ),
             });
           }
         } catch (emailError) {
-          console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
+          console.error(
+            `❌ Email failed for order ${order.orderNumber}:`,
+            emailError.message
+          );
         }
 
-        console.log(`✅🔔📧 Order ${order.orderNumber} marked as "تم التحميل" automatically`);
+        console.log(
+          `✅🔔📧 Order ${order.orderNumber} marked as "جاهز للتنفيذ" automatically`
+        );
       }
     }
   } catch (error) {
