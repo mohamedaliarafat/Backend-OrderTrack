@@ -1533,7 +1533,7 @@ exports.checkCompletedLoading = async () => {
   try {
     const now = new Date();
 
-    // الطلبات التي انتهى وقت تحميلها ولم تُحدّث حالتها
+    // الطلبات التي انتهى وقت تحميلها ولم تُنفّذ بعد
     const orders = await Order.find({
       status: { $in: ['في انتظار التحميل', 'جاهز للتحميل'] },
       loadingCompletedAt: { $exists: false },
@@ -1549,16 +1549,23 @@ exports.checkCompletedLoading = async () => {
     for (const order of orders) {
       const loadingDateTime = order.getFullLoadingDateTime();
 
+      // ⏰ بعد يوم كامل من انتهاء وقت التحميل
+      const oneDayAfterLoading = new Date(loadingDateTime);
+      oneDayAfterLoading.setDate(oneDayAfterLoading.getDate() + 1);
+
       /**
-       * ✅ التعديل المهم هنا
-       * ❌ حذفنا منطق (بعد ساعة)
-       * ✅ نعتمد فقط على وقت التحميل الفعلي
+       * ✅ الشرط الجديد:
+       * - الوقت عدى يوم كامل بعد التحميل
+       * - الطلب مدمج فقط
        */
-      if (now >= loadingDateTime) {
+      if (
+        now >= oneDayAfterLoading &&
+        order.orderSource === 'مدمج'
+      ) {
         const oldStatus = order.status;
 
-        // ✅ تحديث حالة الطلب (جاهز للتنفيذ بدل تم التحميل)
-        order.status = 'جاهز للتنفيذ';
+        // ✅ الحالة النهائية
+        order.status = 'تم التنفيذ';
         order.loadingCompletedAt = now;
         await order.save();
 
@@ -1568,53 +1575,50 @@ exports.checkCompletedLoading = async () => {
           isActive: true,
         });
 
-        // Notification
+        // 🔔 Notification
         const notification = new Notification({
-          type: 'loading_completed',
-          title: 'جاهز للتنفيذ',
-          message: `تم تحديث حالة الطلب ${order.orderNumber} إلى "جاهز للتنفيذ" بعد انتهاء وقت التحميل`,
+          type: 'execution_completed',
+          title: 'تم التنفيذ',
+          message: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا بعد مرور يوم كامل من انتهاء التحميل`,
           data: {
             orderId: order._id,
             orderNumber: order.orderNumber,
             customerName: order.customerName,
             oldStatus,
-            newStatus: 'جاهز للتنفيذ',
+            newStatus: 'تم التنفيذ',
             auto: true,
+            isMerged: true,
           },
           recipients: adminUsers.map((u) => ({ user: u._id })),
           createdBy: order.createdBy?._id,
         });
         await notification.save();
 
-        // Activity Log
+        // 📝 Activity Log
         const activity = new Activity({
           orderId: order._id,
           activityType: 'تغيير حالة',
-          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "جاهز للتنفيذ" بعد انتهاء وقت التحميل`,
+          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التنفيذ" بعد مرور يوم من انتهاء التحميل (طلب مدمج)`,
           performedBy: null,
           performedByName: 'النظام',
           changes: {
-            الحالة: `من: ${oldStatus} → إلى: جاهز للتنفيذ`,
+            الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`,
           },
         });
         await activity.save();
 
-        // Email
+        // 📧 Email للعميل المدمج
         try {
           const emails = await getOrderEmails(order);
 
-          if (!emails || emails.length === 0) {
-            console.log(
-              `⚠️ No valid emails for loading completion - order ${order.orderNumber}`
-            );
-          } else {
+          if (emails && emails.length > 0) {
             await sendEmail({
               to: emails,
-              subject: `🚚 الطلب ${order.orderNumber} جاهز للتنفيذ`,
+              subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
               html: EmailTemplates.orderStatusTemplate(
                 order,
                 oldStatus,
-                'جاهز للتنفيذ',
+                'تم التنفيذ',
                 'النظام'
               ),
             });
@@ -1627,15 +1631,14 @@ exports.checkCompletedLoading = async () => {
         }
 
         console.log(
-          `✅🔔📧 Order ${order.orderNumber} marked as "جاهز للتنفيذ" automatically`
+          `✅ Order ${order.orderNumber} marked as "تم التنفيذ" after 1 day (merged order)`
         );
       }
     }
   } catch (error) {
-    console.error('❌ خطأ في التحقق من اكتمال التحميل:', error);
+    console.error('❌ خطأ في checkCompletedLoading:', error);
   }
 };
-
 // ============================================
 // 📊 إحصائيات الطلبات
 // ============================================
