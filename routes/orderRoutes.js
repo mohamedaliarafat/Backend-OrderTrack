@@ -7,9 +7,14 @@ const { authMiddleware, adminMiddleware } = require('../middleware/authMiddlewar
 
 // إضافة middleware للمديرين
 const managerMiddleware = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'غير مصرح (لا يوجد مستخدم)' });
+  }
+
   if (req.user.role !== 'admin' && req.user.role !== 'manager') {
     return res.status(403).json({ error: 'غير مسموح بالوصول' });
   }
+
   next();
 };
 
