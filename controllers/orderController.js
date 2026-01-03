@@ -2240,83 +2240,115 @@ exports.deleteAttachment = async (req, res) => {
 // ⏰ التحقق من إشعارات الوصول
 // ============================================
 
+const { safeSendEmail } = require('../services/emailQueue');
+
 exports.checkArrivalNotifications = async () => {
   try {
     const now = new Date();
 
-    // الطلبات التي لم يُرسل لها إشعار بعد
+    // الطلبات التي لم يُرسل لها إشعار أو إيميل بعد
     const orders = await Order.find({
       status: { $in: ['جاهز للتحميل', 'في انتظار التحميل', 'مخصص للعميل', 'في الطريق'] },
       arrivalNotificationSentAt: { $exists: false },
     })
-    .populate('customer', 'name email')
-    .populate('supplier', 'name email contactPerson')
-    .populate('createdBy', 'name email');
+      .populate('customer', 'name email')
+      .populate('supplier', 'name email contactPerson')
+      .populate('createdBy', 'name email');
+
+    if (!orders.length) {
+      return;
+    }
 
     const User = require('../models/User');
     const Notification = require('../models/Notification');
 
+    // Admin + Manager مرة واحدة (تحسين أداء)
+    const adminUsers = await User.find({
+      role: { $in: ['admin', 'manager'] },
+      isActive: true,
+    });
+
     for (const order of orders) {
-      const notificationTime = order.getArrivalNotificationTime();
+      try {
+        const notificationTime = order.getArrivalNotificationTime();
 
-      if (now >= notificationTime) {
-        // Admin + Manager
-        const adminUsers = await User.find({
-          role: { $in: ['admin', 'manager'] },
-          isActive: true,
-        });
+        if (now < notificationTime) {
+          continue;
+        }
 
-        // إنشاء Notification
-        const notification = new Notification({
-          type: 'arrival_reminder',
-          title: 'تذكير بقرب وقت الوصول',
-          message: `الطلب رقم ${order.orderNumber} (${order.customerName}) سيصل خلال ساعتين ونصف`,
-          data: {
-            orderId: order._id,
-            orderNumber: order.orderNumber,
-            customerName: order.customerName,
-            expectedArrival: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
-            supplierName: order.supplierName,
-            auto: true,
-          },
-          recipients: adminUsers.map((user) => ({ user: user._id })),
-          createdBy: order.createdBy?._id,
-        });
+        // =========================
+        // 🔔 إنشاء Notification
+        // =========================
+        if (adminUsers.length > 0) {
+          const notification = new Notification({
+            type: 'arrival_reminder',
+            title: 'تذكير بقرب وقت الوصول',
+            message: `الطلب رقم ${order.orderNumber} (${order.customerName}) سيصل خلال ساعتين ونصف`,
+            data: {
+              orderId: order._id,
+              orderNumber: order.orderNumber,
+              customerName: order.customerName,
+              expectedArrival: `${order.arrivalDate.toLocaleDateString('ar-SA')} ${order.arrivalTime}`,
+              supplierName: order.supplierName,
+              auto: true,
+            },
+            recipients: adminUsers.map((user) => ({ user: user._id })),
+            createdBy: order.createdBy?._id,
+          });
 
-        await notification.save();
+          await notification.save();
+        }
 
-        // إرسال الإيميل
+        // =========================
+        // 📧 إرسال الإيميل (Rate Limited)
+        // =========================
         try {
           const arrivalDateTime = order.getFullArrivalDateTime();
           const timeRemainingMs = arrivalDateTime - now;
+          const timeRemaining = formatDuration(timeRemainingMs);
 
           const emails = await getOrderEmails(order);
 
-          if (!emails || emails.length === 0) {
-            console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
+          if (emails && emails.length > 0) {
+            await safeSendEmail(() =>
+              sendEmail({
+                to: emails,
+                subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
+                html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
+              })
+            );
           } else {
-            await sendEmail({
-              to: emails,
-              subject: `⏰ تذكير بوصول الطلب ${order.orderNumber}`,
-              html: EmailTemplates.arrivalReminderTemplate(order, formatDuration(timeRemainingMs)),
-            });
+            console.log(`⚠️ No valid emails for arrival reminder - order ${order.orderNumber}`);
           }
         } catch (emailError) {
-          console.error(`❌ Email failed for order ${order.orderNumber}:`, emailError.message);
+          console.error(
+            `❌ Email failed for order ${order.orderNumber}:`,
+            emailError.message
+          );
         }
 
-        // تحديث حالة الإرسال
+        // =========================
+        // 💾 تحديث حالة الإرسال
+        // =========================
         order.arrivalNotificationSentAt = new Date();
         order.arrivalEmailSentAt = new Date();
         await order.save();
 
-        console.log(`🔔📧 Arrival notification + email sent for order ${order.orderNumber}`);
+        console.log(
+          `🔔📧 Arrival notification + email sent for order ${order.orderNumber}`
+        );
+      } catch (orderError) {
+        console.error(
+          `❌ Error processing arrival notification for order ${order.orderNumber}:`,
+          orderError.message
+        );
       }
     }
   } catch (error) {
     console.error('❌ خطأ في التحقق من إشعارات الوصول:', error);
   }
 };
+
 
 // ============================================
 // ✅ التحقق من اكتمال التحميل
