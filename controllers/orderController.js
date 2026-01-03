@@ -557,11 +557,29 @@ exports.getOrders = async (req, res) => {
     // حساب الإحصائيات حسب النوع والحالة
     const stats = {
       totalOrders: total,
-      bySource: {
-        supplier: await Order.countDocuments({ ...filter, orderSource: 'مورد' }),
-        customer: await Order.countDocuments({ ...filter, orderSource: 'عميل' }),
-        merged: await Order.countDocuments({ ...filter, orderSource: 'مدمج' })
-      },
+    const stats = {
+  totalOrders: total,
+  bySource: {
+    supplier: await Order.countDocuments({
+      ...filter,
+      orderSource: 'مورد'
+    }),
+
+    // ⭐ طلبات العميل + الطلبات المدمجة اللي فيها عميل
+    customer: await Order.countDocuments({
+      ...filter,
+      $or: [
+        { orderSource: 'عميل' },
+        { orderSource: 'مدمج', customer: { $ne: null } }
+      ]
+    }),
+
+    merged: await Order.countDocuments({
+      ...filter,
+      orderSource: 'مدمج'
+    })
+  },
+
       byStatus: {
         pending: await Order.countDocuments({ 
           ...filter, 
