@@ -553,10 +553,6 @@ exports.getOrders = async (req, res) => {
 
     // الحصول على العدد الإجمالي
     const total = await Order.countDocuments(filter);
-
-    // حساب الإحصائيات حسب النوع والحالة
-    const stats = {
-      totalOrders: total,
     const stats = {
   totalOrders: total,
   bySource: {
