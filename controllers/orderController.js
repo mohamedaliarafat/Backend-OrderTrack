@@ -264,12 +264,6 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-
-
-
-
-
-
 // ============================================
 // 📋 جلب جميع الطلبات
 // ============================================
@@ -309,6 +303,10 @@ exports.getOrders = async (req, res) => {
       filter.orderNumber = new RegExp(req.query.orderNumber, 'i');
     }
     
+    if (req.query.supplierOrderNumber) {
+      filter.supplierOrderNumber = new RegExp(req.query.supplierOrderNumber, 'i');
+    }
+    
     if (req.query.city) {
       filter.city = new RegExp(req.query.city, 'i');
     }
@@ -317,57 +315,378 @@ exports.getOrders = async (req, res) => {
       filter.area = new RegExp(req.query.area, 'i');
     }
     
-    if (req.query.startDate) {
-      filter.orderDate = { $gte: new Date(req.query.startDate) };
-    }
-    
-    if (req.query.endDate) {
-      if (filter.orderDate) {
-        filter.orderDate.$lte = new Date(req.query.endDate);
-      } else {
-        filter.orderDate = { $lte: new Date(req.query.endDate) };
-      }
-    }
-
-    // تصفية حسب نوع المنتج
     if (req.query.productType) {
       filter.productType = req.query.productType;
     }
+    
+    if (req.query.fuelType) {
+      filter.fuelType = req.query.fuelType;
+    }
+    
+    if (req.query.paymentStatus) {
+      filter.paymentStatus = req.query.paymentStatus;
+    }
+    
+    if (req.query.driverName) {
+      filter.driverName = new RegExp(req.query.driverName, 'i');
+    }
+    
+    if (req.query.createdByName) {
+      filter.createdByName = new RegExp(req.query.createdByName, 'i');
+    }
+    
+    // تصفية حسب التواريخ
+    if (req.query.startDate || req.query.endDate) {
+      const dateField = req.query.dateField || 'orderDate';
+      filter[dateField] = {};
+      
+      if (req.query.startDate) {
+        const startDate = new Date(req.query.startDate);
+        startDate.setHours(0, 0, 0, 0);
+        filter[dateField].$gte = startDate;
+      }
+      
+      if (req.query.endDate) {
+        const endDate = new Date(req.query.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        filter[dateField].$lte = endDate;
+      }
+    }
 
-    // جلب الطلبات
+    // تصفية حسب حالة التحميل/التوصيل
+    if (req.query.isOverdue) {
+      const now = new Date();
+      if (req.query.isOverdue === 'arrival') {
+        filter.$expr = {
+          $lt: [
+            {
+              $dateFromParts: {
+                year: { $year: '$arrivalDate' },
+                month: { $month: '$arrivalDate' },
+                day: { $dayOfMonth: '$arrivalDate' },
+                hour: { $toInt: { $arrayElemAt: [{ $split: ['$arrivalTime', ':'] }, 0] } },
+                minute: { $toInt: { $arrayElemAt: [{ $split: ['$arrivalTime', ':'] }, 1] } }
+              }
+            },
+            now
+          ]
+        };
+      } else if (req.query.isOverdue === 'loading') {
+        filter.$expr = {
+          $lt: [
+            {
+              $dateFromParts: {
+                year: { $year: '$loadingDate' },
+                month: { $month: '$loadingDate' },
+                day: { $dayOfMonth: '$loadingDate' },
+                hour: { $toInt: { $arrayElemAt: [{ $split: ['$loadingTime', ':'] }, 0] } },
+                minute: { $toInt: { $arrayElemAt: [{ $split: ['$loadingTime', ':'] }, 1] } }
+              }
+            },
+            now
+          ]
+        };
+      }
+    }
+
+    // جلب الطلبات مع جميع العلاقات
     const orders = await Order.find(filter)
-      .populate('customer', 'name code phone email')
-      .populate('supplier', 'name company contactPerson')
-      .populate('createdBy', 'name email')
-      .populate('driver', 'name phone vehicleNumber')
+      .populate('customer', 'name code phone email city area address')
+      .populate('supplier', 'name company contactPerson phone email address city area')
+      .populate('createdBy', 'name email role')
+      .populate('driver', 'name phone vehicleNumber licenseNumber')
+      .populate('mergedWithOrderId', 'orderNumber customerName supplierName')
       .sort({ orderDate: -1, createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
-    // إضافة معلومات العرض لكل طلب
-    const ordersWithDisplayInfo = orders.map(order => ({
-      ...order.toObject(),
-      displayInfo: order.getDisplayInfo ? order.getDisplayInfo() : null
-    }));
+    // معالجة كل طلب للحصول على معلومات إضافية
+    const ordersWithDisplayInfo = await Promise.all(
+      orders.map(async (order) => {
+        // الحصول على معلومات العرض الأساسية
+        const displayInfo = order.getDisplayInfo ? order.getDisplayInfo() : {
+          orderNumber: order.orderNumber,
+          orderSource: order.orderSource,
+          orderSourceText: getOrderSourceText(order.orderSource),
+          supplierName: order.supplierName || 'غير محدد',
+          customerName: order.customerName || 'غير محدد',
+          status: order.status,
+          statusColor: getStatusColor(order.status),
+          location: getLocation(order),
+          fuelType: order.fuelType,
+          quantity: order.quantity,
+          unit: order.unit,
+          mergeStatus: order.mergeStatus,
+          totalPrice: order.totalPrice,
+          paymentStatus: order.paymentStatus,
+          createdAt: order.createdAt
+        };
 
-    // العدد الإجمالي
+        // حساب المؤقتات
+        let arrivalCountdown = 'غير متاح';
+        let loadingCountdown = 'غير متاح';
+        let isArrivalOverdue = false;
+        let isLoadingOverdue = false;
+
+        if (order.getFullArrivalDateTime) {
+          const arrivalDateTime = order.getFullArrivalDateTime();
+          const now = new Date();
+          const arrivalRemaining = arrivalDateTime - now;
+          
+          if (arrivalRemaining <= 0) {
+            arrivalCountdown = 'تأخر';
+            isArrivalOverdue = true;
+          } else {
+            arrivalCountdown = formatDuration(arrivalRemaining);
+          }
+        }
+
+        if (order.getFullLoadingDateTime) {
+          const loadingDateTime = order.getFullLoadingDateTime();
+          const now = new Date();
+          const loadingRemaining = loadingDateTime - now;
+          
+          if (loadingRemaining <= 0) {
+            loadingCountdown = 'تأخر';
+            isLoadingOverdue = true;
+          } else {
+            loadingCountdown = formatDuration(loadingRemaining);
+          }
+        }
+
+        // الحصول على معلومات الطرف المدمج معه
+        let mergePartnerInfo = null;
+        if (order.mergedWithOrderId && typeof order.mergedWithOrderId === 'object') {
+          mergePartnerInfo = {
+            orderNumber: order.mergedWithOrderId.orderNumber,
+            name: order.orderSource === 'مورد' 
+              ? order.mergedWithOrderId.customerName 
+              : order.mergedWithOrderId.supplierName,
+            type: order.orderSource === 'مورد' ? 'عميل' : 'مورد'
+          };
+        } else if (order.mergedWithInfo) {
+          mergePartnerInfo = order.mergedWithInfo;
+        }
+
+        // الحصول على معلومات إضافية حسب نوع الطلب
+        let additionalInfo = {};
+        
+        if (order.orderSource === 'مورد') {
+          additionalInfo = {
+            supplierOrder: {
+              orderNumber: order.orderNumber,
+              supplierName: order.supplierName,
+              supplierCompany: order.supplierCompany,
+              supplierPhone: order.supplierPhone,
+              status: order.status,
+              mergeStatus: order.mergeStatus,
+              mergedWith: mergePartnerInfo
+            }
+          };
+        } else if (order.orderSource === 'عميل') {
+          additionalInfo = {
+            customerOrder: {
+              orderNumber: order.orderNumber,
+              customerName: order.customerName,
+              customerCode: order.customerCode,
+              customerPhone: order.customerPhone,
+              requestType: order.requestType,
+              status: order.status,
+              mergeStatus: order.mergeStatus,
+              mergedWith: mergePartnerInfo
+            }
+          };
+        } else if (order.orderSource === 'مدمج') {
+          additionalInfo = {
+            mergedOrder: {
+              orderNumber: order.orderNumber,
+              supplierName: order.supplierName,
+              customerName: order.customerName,
+              quantity: order.quantity,
+              unit: order.unit,
+              status: order.status,
+              mergeStatus: order.mergeStatus
+            }
+          };
+        }
+
+        return {
+          ...order.toObject(),
+          displayInfo: {
+            ...displayInfo,
+            arrivalCountdown,
+            loadingCountdown,
+            isArrivalOverdue,
+            isLoadingOverdue
+          },
+          mergePartnerInfo,
+          additionalInfo,
+          timelines: {
+            orderDate: order.orderDate,
+            loadingDate: order.loadingDate,
+            arrivalDate: order.arrivalDate,
+            loadingTime: order.loadingTime,
+            arrivalTime: order.arrivalTime,
+            createdAt: order.createdAt,
+            updatedAt: order.updatedAt,
+            mergedAt: order.mergedAt,
+            completedAt: order.completedAt
+          },
+          financials: {
+            unitPrice: order.unitPrice,
+            totalPrice: order.totalPrice,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            driverEarnings: order.driverEarnings
+          },
+          logistics: {
+            driverName: order.driverName,
+            driverPhone: order.driverPhone,
+            vehicleNumber: order.vehicleNumber,
+            deliveryDuration: order.deliveryDuration,
+            distance: order.distance
+          }
+        };
+      })
+    );
+
+    // الحصول على العدد الإجمالي
     const total = await Order.countDocuments(filter);
 
+    // حساب الإحصائيات حسب النوع والحالة
+    const stats = {
+      totalOrders: total,
+      bySource: {
+        supplier: await Order.countDocuments({ ...filter, orderSource: 'مورد' }),
+        customer: await Order.countDocuments({ ...filter, orderSource: 'عميل' }),
+        merged: await Order.countDocuments({ ...filter, orderSource: 'مدمج' })
+      },
+      byStatus: {
+        pending: await Order.countDocuments({ 
+          ...filter, 
+          status: { 
+            $in: ['قيد الإنشاء', 'في انتظار التخصيص', 'في انتظار الدمج'] 
+          } 
+        }),
+        inProgress: await Order.countDocuments({ 
+          ...filter, 
+          status: { 
+            $in: ['تم الإنشاء', 'تم تخصيص طلب المورد', 'تم دمجه مع العميل', 
+                  'تم دمجه مع المورد', 'جاهز للتحميل', 'في انتظار التحميل'] 
+          } 
+        }),
+        active: await Order.countDocuments({ 
+          ...filter, 
+          status: { 
+            $in: ['تم التحميل', 'في الطريق'] 
+          } 
+        }),
+        completed: await Order.countDocuments({ 
+          ...filter, 
+          status: { 
+            $in: ['تم التسليم', 'تم التنفيذ', 'مكتمل'] 
+          } 
+        }),
+        cancelled: await Order.countDocuments({ 
+          ...filter, 
+          status: 'ملغى' 
+        })
+      }
+    };
+
     res.json({
+      success: true,
       orders: ordersWithDisplayInfo,
       pagination: {
         page,
         limit,
         total,
         pages: Math.ceil(total / limit)
-      }
+      },
+      stats,
+      filters: req.query
     });
   } catch (error) {
     console.error('Error getting orders:', error);
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    res.status(500).json({ 
+      success: false,
+      error: 'حدث خطأ في السيرفر',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
+// ============================================
+// 🔧 دوال مساعدة محلية
+// ============================================
+
+function getOrderSourceText(orderSource) {
+  switch(orderSource) {
+    case 'مورد': return 'طلب مورد';
+    case 'عميل': return 'طلب عميل';
+    case 'مدمج': return 'طلب مدمج';
+    default: return 'طلب';
+  }
+}
+
+function getStatusColor(status) {
+  const statusColors = {
+    // طلبات المورد
+    'قيد الإنشاء': '#ff9800',
+    'تم الإنشاء': '#2196f3',
+    'في انتظار الدمج': '#ff5722',
+    'تم دمجه مع العميل': '#9c27b0',
+    'جاهز للتحميل': '#00bcd4',
+    'تم التحميل': '#4caf50',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    
+    // طلبات العميل
+    'في انتظار التخصيص': '#ff9800',
+    'تم تخصيص طلب المورد': '#2196f3',
+    'في انتظار الدمج': '#ff5722',
+    'تم دمجه مع المورد': '#9c27b0',
+    'في انتظار التحميل': '#00bcd4',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    
+    // طلبات مدمجة
+    'تم الدمج': '#9c27b0',
+    'مخصص للعميل': '#2196f3',
+    'جاهز للتحميل': '#00bcd4',
+    'تم التحميل': '#4caf50',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    'تم التنفيذ': '#4caf50',
+    
+    // عامة
+    'ملغى': '#f44336',
+    'مكتمل': '#8bc34a'
+  };
+  
+  return statusColors[status] || '#757575';
+}
+
+function getLocation(order) {
+  if (order.city && order.area) {
+    return `${order.city} - ${order.area}`;
+  }
+  return order.city || order.area || 'غير محدد';
+}
+
+function formatDuration(milliseconds) {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const days = Math.floor(totalSeconds / (3600 * 24));
+  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  
+  const parts = [];
+  if (days > 0) parts.push(`${days} يوم`);
+  if (hours > 0) parts.push(`${hours} ساعة`);
+  if (minutes > 0) parts.push(`${minutes} دقيقة`);
+  
+  return parts.join(' و ') || 'أقل من دقيقة';
+}
 // ============================================
 // 🔍 جلب طلب محدد
 // ============================================
@@ -924,25 +1243,13 @@ exports.updateOrderStatus = async (req, res) => {
     const { status, reason } = req.body;
 
     const order = await Order.findById(id)
-      .populate('customer', 'name email')
-      .populate('supplier', 'name email contactPerson')
-      .populate('createdBy', 'name email');
+      .populate('customer', 'name email phone')
+      .populate('supplier', 'name email contactPerson phone')
+      .populate('createdBy', 'name email')
+      .populate('driver', 'name phone vehicleNumber');
 
     if (!order) {
       return res.status(404).json({ error: 'الطلب غير موجود' });
-    }
-
-    // التحقق من الصلاحيات
-    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-      // السماح للسائق بتغيير الحالة إلى "في الطريق" أو "تم التسليم" فقط
-      if (req.user.role === 'driver') {
-        const allowedDriverStatuses = ['في الطريق', 'تم التسليم', 'تم التحميل'];
-        if (!allowedDriverStatuses.includes(status)) {
-          return res.status(403).json({ error: 'غير مصرح بتغيير الحالة إلى هذا الوضع' });
-        }
-      } else {
-        return res.status(403).json({ error: 'غير مصرح بتغيير حالة الطلب' });
-      }
     }
 
     const oldStatus = order.status;
@@ -955,93 +1262,333 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    // تحديث الحالة
+    // ============================================
+    // 🔐 التحقق من الصلاحيات
+    // ============================================
+    const user = req.user;
+    
+    if (user.role !== 'admin' && user.role !== 'manager') {
+      if (user.role === 'driver') {
+        // السماح للسائق فقط بتغيير حالات معينة
+        const allowedDriverStatuses = ['في الطريق', 'تم التسليم', 'تم التحميل'];
+        if (!allowedDriverStatuses.includes(status)) {
+          return res.status(403).json({ 
+            error: 'غير مصرح للسائق بتغيير الحالة إلى هذا الوضع' 
+          });
+        }
+        
+        // التحقق من أن السائق هو المسؤول عن هذا الطلب
+        if (order.driver && order.driver._id.toString() !== user._id.toString()) {
+          return res.status(403).json({ 
+            error: 'أنت لست السائق المسؤول عن هذا الطلب' 
+          });
+        }
+      } else {
+        return res.status(403).json({ 
+          error: 'غير مصرح لك بتغيير حالة الطلب' 
+        });
+      }
+    }
+
+    // ============================================
+    // 🔄 التحقق من التسلسل المنطقي للحالات
+    // ============================================
+    const statusFlow = {
+      // ========== طلبات المورد ==========
+      'قيد الإنشاء': ['تم الإنشاء', 'ملغى'],
+      'تم الإنشاء': ['في انتظار الدمج', 'ملغى'],
+      'في انتظار الدمج': ['تم دمجه مع العميل', 'ملغى'],
+      'تم دمجه مع العميل': ['جاهز للتحميل', 'ملغى'],
+      'جاهز للتحميل': ['تم التحميل', 'ملغى'],
+      'تم التحميل': ['في الطريق', 'ملغى'],
+      'في الطريق': ['تم التسليم', 'ملغى'],
+      'تم التسليم': ['مكتمل'],
+      
+      // ========== طلبات العميل ==========
+      'في انتظار التخصيص': ['تم تخصيص طلب المورد', 'ملغى'],
+      'تم تخصيص طلب المورد': ['في انتظار الدمج', 'ملغى'],
+      'في انتظار الدمج': ['تم دمجه مع المورد', 'ملغى'],
+      'تم دمجه مع المورد': ['في انتظار التحميل', 'ملغى'],
+      'في انتظار التحميل': ['في الطريق', 'ملغى'],
+      'في الطريق': ['تم التسليم', 'ملغى'],
+      'تم التسليم': ['مكتمل'],
+      
+      // ========== طلبات مدمجة ==========
+      'تم الدمج': ['مخصص للعميل', 'ملغى'],
+      'مخصص للعميل': ['جاهز للتحميل', 'ملغى'],
+      'جاهز للتحميل': ['تم التحميل', 'ملغى'],
+      'تم التحميل': ['في الطريق', 'ملغى'],
+      'في الطريق': ['تم التسليم', 'ملغى'],
+      'تم التسليم': ['تم التنفيذ', 'ملغى'],
+      'تم التنفيذ': ['مكتمل']
+    };
+
+    // التحقق من أن الانتقال مسموح
+    if (!statusFlow[oldStatus] || !statusFlow[oldStatus].includes(status)) {
+      return res.status(400).json({
+        error: `غير مسموح بتغيير الحالة من "${oldStatus}" إلى "${status}"`,
+        allowedStatuses: statusFlow[oldStatus] || []
+      });
+    }
+
+    // ============================================
+    // 📝 تحديث الحالة ومعالجة الحالات الخاصة
+    // ============================================
     order.status = status;
     order.updatedAt = new Date();
 
-    // إذا تم التحميل
-    if (status === 'تم التحميل' && oldStatus !== 'تم التحميل') {
-      order.loadingCompletedAt = new Date();
+    switch(status) {
+      case 'تم التحميل':
+        order.loadingCompletedAt = new Date();
+        if (order.driver) {
+          try {
+            // تحديث إحصائيات السائق
+            await mongoose.model('Driver').findByIdAndUpdate(
+              order.driver._id,
+              {
+                $inc: {
+                  totalDeliveries: 1,
+                  totalEarnings: order.driverEarnings || 0,
+                  totalDistance: order.distance || 0
+                }
+              }
+            );
+          } catch (statsError) {
+            console.error('❌ Error updating driver stats:', statsError);
+          }
+        }
+        break;
+        
+      case 'في الطريق':
+        // بدء التتبع
+        order.trackingStartedAt = new Date();
+        break;
+        
+      case 'تم التسليم':
+        order.completedAt = new Date();
+        order.actualArrivalTime = new Date().toLocaleTimeString('ar-SA', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+        break;
+        
+      case 'تم التنفيذ':
+        order.completedAt = new Date();
+        break;
+        
+      case 'ملغى':
+        order.cancelledAt = new Date();
+        if (reason) {
+          order.cancellationReason = reason;
+          order.notes = (order.notes || '') + `\nسبب الإلغاء: ${reason}`;
+        }
+        break;
+        
+      case 'مكتمل':
+        order.completedAt = new Date();
+        order.mergeStatus = 'مكتمل';
+        break;
     }
 
-    // إذا تم التسليم
-    if (status === 'تم التسليم' && oldStatus !== 'تم التسليم') {
-      order.completedAt = new Date();
-    }
-
-    // إذا تم الإلغاء
-    if (status === 'ملغى' && oldStatus !== 'ملغى') {
-      order.cancelledAt = new Date();
-      if (reason) order.notes = (order.notes || '') + `\nسبب الإلغاء: ${reason}`;
-    }
-
+    // ============================================
+    // 💾 حفظ التغييرات
+    // ============================================
     await order.save();
 
-    // تسجيل النشاط
+    // ============================================
+    // 📋 تسجيل النشاط
+    // ============================================
     const activity = new Activity({
       orderId: order._id,
       activityType: 'تغيير حالة',
       description: `تم تغيير حالة الطلب رقم ${order.orderNumber} من "${oldStatus}" إلى "${status}"`,
-      performedBy: req.user._id,
-      performedByName: req.user.name,
+      performedBy: user._id,
+      performedByName: user.name,
       changes: {
         الحالة: `من: ${oldStatus} → إلى: ${status}`,
-        ...(reason ? { 'سبب التغيير': reason } : {})
+        ...(reason ? { 'سبب التغيير': reason } : {}),
+        ...(status === 'تم التحميل' ? { 'وقت التحميل الفعلي': new Date().toLocaleString('ar-SA') } : {}),
+        ...(status === 'تم التسليم' ? { 'وقت التسليم الفعلي': new Date().toLocaleString('ar-SA') } : {})
       },
     });
     await activity.save();
 
-    // إرسال الإيميل
+    // ============================================
+    // 📧 إرسال الإيميلات
+    // ============================================
     try {
       const emails = await getOrderEmails(order);
 
       if (!emails || emails.length === 0) {
         console.log(`⚠️ No valid emails for order status update - order ${order.orderNumber}`);
       } else {
+        // تحديد قالب الإيميل المناسب
+        let emailTemplate;
+        
+        if (status === 'تم دمجه مع العميل' || status === 'تم تخصيص طلب المورد') {
+          // إيميل خاص بالدمج
+          const partnerInfo = await order.getMergePartnerInfo();
+          if (partnerInfo) {
+            if (order.orderSource === 'مورد') {
+              emailTemplate = EmailTemplates.mergeSupplierTemplate(order, partnerInfo);
+            } else {
+              emailTemplate = EmailTemplates.mergeCustomerTemplate(order, partnerInfo);
+            }
+          } else {
+            emailTemplate = EmailTemplates.orderStatusTemplate(order, oldStatus, status, user.name, reason);
+          }
+        } else {
+          // إيميل حالة عادي
+          emailTemplate = EmailTemplates.orderStatusTemplate(order, oldStatus, status, user.name, reason);
+        }
+
         await sendEmail({
           to: emails,
           subject: `🔄 تحديث حالة الطلب ${order.orderNumber}`,
-          html: EmailTemplates.orderStatusTemplate(order, oldStatus, status, req.user.name, reason),
+          html: emailTemplate,
         });
+        
+        console.log(`📧 Status update email sent for order ${order.orderNumber}`);
       }
     } catch (emailError) {
       console.error('❌ Failed to send order status email:', emailError.message);
     }
 
+    // ============================================
+    // 🔔 إرسال إشعارات إذا لزم الأمر
+    // ============================================
+    if (['في الطريق', 'تم التسليم', 'تم التحميل'].includes(status)) {
+      try {
+        const Notification = require('../models/Notification');
+        const User = require('../models/User');
+        
+        // مستخدمين للإشعار (المسؤولين + صاحب الطلب)
+        const usersToNotify = await User.find({
+          $or: [
+            { role: { $in: ['admin', 'manager'] } },
+            { _id: order.createdBy?._id }
+          ],
+          isActive: true
+        });
+
+        if (usersToNotify.length > 0) {
+          const notification = new Notification({
+            type: 'order_status_update',
+            title: `تحديث حالة الطلب ${order.orderNumber}`,
+            message: `تم تحديث حالة الطلب ${order.orderNumber} إلى "${status}"`,
+            data: {
+              orderId: order._id,
+              orderNumber: order.orderNumber,
+              oldStatus,
+              newStatus: status,
+              updatedBy: user.name,
+              customerName: order.customerName,
+              supplierName: order.supplierName
+            },
+            recipients: usersToNotify.map(u => ({ user: u._id })),
+            createdBy: user._id
+          });
+          
+          await notification.save();
+        }
+      } catch (notifError) {
+        console.error('❌ Failed to create notification:', notifError.message);
+      }
+    }
+
+    // ============================================
+    // 📦 تحديث الطلب المدمج المرتبط إذا وجد
+    // ============================================
+    if (order.mergedWithOrderId && ['تم التسليم', 'تم التحميل', 'في الطريق'].includes(status)) {
+      try {
+        const mergedOrder = await Order.findById(order.mergedWithOrderId);
+        if (mergedOrder) {
+          // تحديث حالة الطلب المدمج بناءً على حالة الطلب الحالي
+          if (status === 'تم التسليم' && mergedOrder.status !== 'تم التسليم') {
+            mergedOrder.status = 'تم التسليم';
+            mergedOrder.completedAt = new Date();
+            await mergedOrder.save();
+            
+            // تسجيل نشاط في الطلب المدمج
+            const mergedActivity = new Activity({
+              orderId: mergedOrder._id,
+              activityType: 'تغيير حالة',
+              description: `تم تحديث حالة الطلب المدمج تلقائياً إلى "تم التسليم" بناءً على حالة الطلب ${order.orderNumber}`,
+              performedBy: user._id,
+              performedByName: user.name
+            });
+            await mergedActivity.save();
+          }
+        }
+      } catch (mergeError) {
+        console.error('❌ Error updating merged order:', mergeError.message);
+      }
+    }
+
+    // ============================================
+    // 📊 إرجاع النتيجة
+    // ============================================
+    const updatedOrder = await Order.findById(order._id)
+      .populate('customer', 'name code phone email')
+      .populate('supplier', 'name company contactPerson phone')
+      .populate('driver', 'name phone vehicleNumber')
+      .populate('createdBy', 'name email');
+
     return res.json({
+      success: true,
       message: 'تم تحديث حالة الطلب بنجاح',
-      order: {
-        ...order.toObject(),
-        displayInfo: order.getDisplayInfo ? order.getDisplayInfo() : null
-      },
-      oldStatus,
-      newStatus: status,
+      data: {
+        order: {
+          ...updatedOrder.toObject(),
+          displayInfo: updatedOrder.getDisplayInfo ? updatedOrder.getDisplayInfo() : null
+        },
+        oldStatus,
+        newStatus: status,
+        updatedBy: {
+          id: user._id,
+          name: user.name,
+          role: user.role
+        },
+        timestamp: new Date().toISOString()
+      }
     });
+
   } catch (error) {
-    console.error('Error updating order status:', error);
-    return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error('❌ Error updating order status:', error);
+    return res.status(500).json({ 
+      error: 'حدث خطأ في السيرفر',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
-
 // ============================================
-// 🔗 دمج الطلبات
+// 🔗 دمج الطلبات - محدثة حسب المتطلبات
 // ============================================
 
 exports.mergeOrders = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
-    const { sourceOrderId, targetOrderId } = req.body;
+    const { supplierOrderId, customerOrderId } = req.body;
 
     // =========================
     // 1️⃣ التحقق من المدخلات
     // =========================
-    if (!sourceOrderId || !targetOrderId) {
+    if (!supplierOrderId || !customerOrderId) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: 'معرف طلب المورد ومعرف طلب العميل مطلوبان',
       });
     }
 
-    if (sourceOrderId === targetOrderId) {
+    if (supplierOrderId === customerOrderId) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: 'لا يمكن دمج الطلب مع نفسه',
@@ -1049,12 +1596,15 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 2️⃣ جلب الطلبات
+    // 2️⃣ جلب الطلبات مع session
     // =========================
-    const supplierOrder = await Order.findById(sourceOrderId);
-    const customerOrder = await Order.findById(targetOrderId);
+    const supplierOrder = await Order.findById(supplierOrderId).session(session);
+    const customerOrder = await Order.findById(customerOrderId).session(session);
 
     if (!supplierOrder || !customerOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(404).json({
         success: false,
         message: 'أحد الطلبات غير موجود',
@@ -1062,22 +1612,35 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 🔴 تحقق مهم (رقم طلب المورد)
+    // 3️⃣ التحقق من أنواع الطلبات
     // =========================
-    if (!supplierOrder.supplierOrderNumber) {
+    if (supplierOrder.orderSource !== 'مورد') {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
-        message: 'رقم طلب المورد غير مُدخل',
+        message: 'الطلب الأول يجب أن يكون طلب مورد',
+      });
+    }
+
+    if (customerOrder.orderSource !== 'عميل') {
+      await session.abortTransaction();
+      session.endSession();
+      
+      return res.status(400).json({
+        success: false,
+        message: 'الطلب الثاني يجب أن يكون طلب عميل',
       });
     }
 
     // =========================
-    // 3️⃣ التحقق من حالة الدمج
+    // 4️⃣ التحقق من حالة الدمج
     // =========================
-    if (
-      supplierOrder.mergeStatus !== 'منفصل' ||
-      customerOrder.mergeStatus !== 'منفصل'
-    ) {
+    if (supplierOrder.mergeStatus !== 'منفصل' || customerOrder.mergeStatus !== 'منفصل') {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: 'أحد الطلبات تم دمجه مسبقًا',
@@ -1085,9 +1648,12 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 4️⃣ التحقق من التوافق
+    // 5️⃣ التحقق من التوافق
     // =========================
     if (supplierOrder.fuelType !== customerOrder.fuelType) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: 'نوع الوقود غير متطابق',
@@ -1098,6 +1664,9 @@ exports.mergeOrders = async (req, res) => {
     const customerQty = Number(customerOrder.quantity || 0);
 
     if (supplierQty < customerQty) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: 'كمية المورد أقل من كمية طلب العميل',
@@ -1105,18 +1674,17 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 5️⃣ إنشاء رقم الطلب المدموج
+    // 6️⃣ إنشاء رقم الطلب المدموج
     // =========================
     const today = new Date();
     const y = today.getFullYear();
     const m = String(today.getMonth() + 1).padStart(2, '0');
     const d = String(today.getDate()).padStart(2, '0');
     const rand = Math.floor(1000 + Math.random() * 9000);
-
     const mergedOrderNumber = `MIX-${y}${m}${d}-${rand}`;
 
     // =========================
-    // 6️⃣ تحديد الموقع
+    // 7️⃣ تحديد الموقع
     // =========================
     let city, area, address;
 
@@ -1135,127 +1703,352 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 7️⃣ إنشاء الطلب المدموج
+    // 8️⃣ إنشاء الطلب المدموج
     // =========================
-    const mergedOrder = new Order({
+    const mergedOrderData = {
       orderSource: 'مدمج',
       mergeStatus: 'مدمج',
       orderNumber: mergedOrderNumber,
-
-      // 🔴 رقم طلب المورد (يدوي)
-      supplierOrderNumber: supplierOrder.supplierOrderNumber,
-
-      mergedFrom: {
-        supplierOrderId: supplierOrder._id,
-        customerOrderId: customerOrder._id,
-        supplierOrderNumber: supplierOrder.supplierOrderNumber,
+      
+      // معلومات الدمج
+      mergedWithOrderId: null,
+      mergedWithInfo: {
+        supplierOrderNumber: supplierOrder.orderNumber,
         customerOrderNumber: customerOrder.orderNumber,
+        supplierName: supplierOrder.supplierName,
+        customerName: customerOrder.customerName,
+        mergedAt: new Date()
       },
-
-      city,
-      area,
-      address,
-
-      supplierAddress: supplierOrder.supplierAddress,
-
+      
+      // معلومات المورد
+      supplierOrderNumber: supplierOrder.supplierOrderNumber,
+      supplier: supplierOrder.supplier,
       supplierName: supplierOrder.supplierName,
       supplierPhone: supplierOrder.supplierPhone,
       supplierCompany: supplierOrder.supplierCompany,
-      supplier: supplierOrder.supplier,
-
+      supplierContactPerson: supplierOrder.supplierContactPerson,
+      supplierAddress: supplierOrder.supplierAddress,
+      
+      // معلومات العميل
       customer: customerOrder.customer,
       customerName: customerOrder.customerName,
       customerCode: customerOrder.customerCode,
       customerPhone: customerOrder.customerPhone,
-
-      requestType: 'مدمج',
+      customerEmail: customerOrder.customerEmail,
+      
+      // معلومات المنتج
       productType: supplierOrder.productType,
       fuelType: supplierOrder.fuelType,
       quantity: customerQty,
       unit: supplierOrder.unit || 'لتر',
-
+      
+      // معلومات الموقع
+      city,
+      area,
+      address,
+      
+      // معلومات التوقيت
       orderDate: new Date(),
       loadingDate: supplierOrder.loadingDate || new Date(),
       loadingTime: supplierOrder.loadingTime || '08:00',
       arrivalDate: customerOrder.arrivalDate || new Date(),
       arrivalTime: customerOrder.arrivalTime || '10:00',
-
-      status: 'مدمج وجاهز للتنفيذ',
-
+      
+      // معلومات الشحن
       driver: supplierOrder.driver,
       driverName: supplierOrder.driverName,
       driverPhone: supplierOrder.driverPhone,
       vehicleNumber: supplierOrder.vehicleNumber,
-
-      notes: `طلب مدمج: ${supplierOrder.notes || ''} | ${customerOrder.notes || ''}`,
-
-      createdBy: supplierOrder.createdBy || customerOrder.createdBy,
-      createdByName:
-        supplierOrder.createdByName ||
-        customerOrder.createdByName ||
-        'النظام',
-
+      
+      // معلومات السعر
+      unitPrice: supplierOrder.unitPrice,
+      totalPrice: supplierOrder.unitPrice ? supplierOrder.unitPrice * customerQty : 0,
+      paymentMethod: supplierOrder.paymentMethod,
+      paymentStatus: supplierOrder.paymentStatus,
+      
+      // حالة الطلب المدمج
+      status: 'تم الدمج',
+      
+      // ملاحظات
+      notes: `طلب مدمج من:\n• طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})\n• طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})\n${supplierOrder.notes ? 'ملاحظات المورد: ' + supplierOrder.notes + '\n' : ''}${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : ''}`.trim(),
+      
+      supplierNotes: supplierOrder.supplierNotes,
+      customerNotes: customerOrder.customerNotes,
+      
+      // معلومات الإنشاء
+      createdBy: req.user._id,
+      createdByName: req.user.name || 'النظام',
+      
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    };
 
-    await mergedOrder.save();
+    const mergedOrder = new Order(mergedOrderData);
+    await mergedOrder.save({ session });
 
     // =========================
-    // 8️⃣ تحديث الطلبات الأصلية
+    // 9️⃣ تحديث الطلبات الأصلية
     // =========================
+    
+    // تحديث طلب المورد
     supplierOrder.mergeStatus = 'مدمج';
-    supplierOrder.status = 'تم دمجه';
-    supplierOrder.mergedOrderId = mergedOrder._id;
+    supplierOrder.status = 'تم دمجه مع العميل';
+    supplierOrder.mergedWithOrderId = mergedOrder._id;
+    supplierOrder.mergedWithInfo = {
+      orderNumber: customerOrder.orderNumber,
+      partyName: customerOrder.customerName,
+      partyType: 'عميل',
+      mergedAt: new Date()
+    };
     supplierOrder.mergedAt = new Date();
+    supplierOrder.updatedAt = new Date();
+    supplierOrder.notes = (supplierOrder.notes || '') + 
+      `\n[${new Date().toLocaleString('ar-SA')}] تم دمجه مع طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})`;
+    
+    await supplierOrder.save({ session });
 
+    // تحديث طلب العميل
     customerOrder.mergeStatus = 'مدمج';
-    customerOrder.status = 'تم دمجه';
-    customerOrder.mergedOrderId = mergedOrder._id;
+    customerOrder.status = 'تم دمجه مع المورد';
+    customerOrder.mergedWithOrderId = mergedOrder._id;
+    customerOrder.mergedWithInfo = {
+      orderNumber: supplierOrder.orderNumber,
+      partyName: supplierOrder.supplierName,
+      partyType: 'مورد',
+      mergedAt: new Date()
+    };
+    customerOrder.supplierOrderNumber = supplierOrder.supplierOrderNumber;
     customerOrder.mergedAt = new Date();
-
-    // 🔴 نسخ رقم طلب المورد إلى العميل
-    customerOrder.supplierOrderNumber =
-      supplierOrder.supplierOrderNumber;
-
-    await supplierOrder.save();
-    await customerOrder.save();
+    customerOrder.updatedAt = new Date();
+    customerOrder.notes = (customerOrder.notes || '') + 
+      `\n[${new Date().toLocaleString('ar-SA')}] تم دمجه مع طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})`;
+    
+    await customerOrder.save({ session });
 
     // =========================
-    // 9️⃣ تسجيل النشاط
+    // 🔟 تسجيل النشاطات
     // =========================
     try {
-      const activity = new Activity({
+      // نشاط للطلب المدموج
+      const mergedActivity = new Activity({
         orderId: mergedOrder._id,
         activityType: 'دمج',
-        description: `تم دمج طلب المورد رقم ${supplierOrder.supplierOrderNumber} مع طلب العميل`,
-        performedByName: supplierOrder.createdByName || 'النظام',
+        description: `تم دمج طلب المورد ${supplierOrder.orderNumber} مع طلب العميل ${customerOrder.orderNumber}`,
+        details: {
+          supplierOrder: supplierOrder.orderNumber,
+          customerOrder: customerOrder.orderNumber,
+          mergedBy: req.user.name || 'النظام',
+          quantity: customerQty,
+          fuelType: supplierOrder.fuelType
+        },
+        performedBy: req.user._id,
+        performedByName: req.user.name || 'النظام',
       });
+      await mergedActivity.save({ session });
 
-      await activity.save();
+      // نشاط لطلب المورد
+      const supplierActivity = new Activity({
+        orderId: supplierOrder._id,
+        activityType: 'دمج',
+        description: `تم دمج الطلب مع طلب العميل ${customerOrder.orderNumber} (${customerOrder.customerName})`,
+        details: {
+          mergedOrder: mergedOrder.orderNumber,
+          customerOrder: customerOrder.orderNumber,
+          customerName: customerOrder.customerName,
+          mergedBy: req.user.name || 'النظام'
+        },
+        performedBy: req.user._id,
+        performedByName: req.user.name || 'النظام',
+      });
+      await supplierActivity.save({ session });
+
+      // نشاط لطلب العميل
+      const customerActivity = new Activity({
+        orderId: customerOrder._id,
+        activityType: 'دمج',
+        description: `تم دمج الطلب مع طلب المورد ${supplierOrder.orderNumber} (${supplierOrder.supplierName})`,
+        details: {
+          mergedOrder: mergedOrder.orderNumber,
+          supplierOrder: supplierOrder.orderNumber,
+          supplierName: supplierOrder.supplierName,
+          mergedBy: req.user.name || 'النظام'
+        },
+        performedBy: req.user._id,
+        performedByName: req.user.name || 'النظام',
+      });
+      await customerActivity.save({ session });
+
     } catch (err) {
-      console.warn('⚠️ Activity not saved:', err.message);
+      console.warn('⚠️ بعض النشاطات لم يتم حفظها:', err.message);
     }
 
     // =========================
-    // 🔟 الاستجابة
+    // 📧 إرسال الإيميلات
+    // =========================
+    try {
+      const sendEmailPromises = [];
+      
+      // إيميل للمورد
+      if (supplierOrder.supplierEmail || supplierOrder.supplier?.email) {
+        const supplierEmail = supplierOrder.supplierEmail || supplierOrder.supplier?.email;
+        const emailTemplate = `
+          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #4CAF50;">✅ تم دمج طلبك مع عميل</h2>
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3>تفاصيل الدمج</h3>
+              <p><strong>رقم طلبك:</strong> ${supplierOrder.orderNumber}</p>
+              <p><strong>اسم العميل:</strong> ${customerOrder.customerName}</p>
+              <p><strong>رقم طلب العميل:</strong> ${customerOrder.orderNumber}</p>
+              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+              <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
+              <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+            </div>
+            <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع العميل</strong></p>
+          </div>
+        `;
+        
+        sendEmailPromises.push(
+          sendEmail({
+            to: supplierEmail,
+            subject: `✅ تم دمج طلبك ${supplierOrder.orderNumber} مع عميل`,
+            html: emailTemplate,
+          })
+        );
+      }
+      
+      // إيميل للعميل
+      if (customerOrder.customerEmail) {
+        const emailTemplate = `
+          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #4CAF50;">✅ تم تخصيص مورد لطلبك</h2>
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3>تفاصيل التخصيص</h3>
+              <p><strong>رقم طلبك:</strong> ${customerOrder.orderNumber}</p>
+              <p><strong>اسم المورد:</strong> ${supplierOrder.supplierName}</p>
+              <p><strong>رقم طلب المورد:</strong> ${supplierOrder.orderNumber}</p>
+              <p><strong>رقم طلب المورد (الخاص بالمورد):</strong> ${supplierOrder.supplierOrderNumber}</p>
+              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+              <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
+              <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+            </div>
+            <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع المورد</strong></p>
+          </div>
+        `;
+        
+        sendEmailPromises.push(
+          sendEmail({
+            to: customerOrder.customerEmail,
+            subject: `✅ تم تخصيص مورد لطلبك ${customerOrder.orderNumber}`,
+            html: emailTemplate,
+          })
+        );
+      }
+      
+      // إيميل للمسؤولين
+      const adminUsers = await mongoose.model('User').find({
+        role: { $in: ['admin', 'manager'] },
+        isActive: true,
+        email: { $exists: true, $ne: '' }
+      }).session(session);
+      
+      if (adminUsers.length > 0) {
+        const adminEmails = adminUsers.map(user => user.email);
+        const adminEmailTemplate = `
+          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #2196F3;">📋 تقرير دمج طلبات</h2>
+            <div style="background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3>تفاصيل الدمج</h3>
+              <p><strong>تم بواسطة:</strong> ${req.user.name || 'النظام'}</p>
+              <p><strong>وقت الدمج:</strong> ${new Date().toLocaleString('ar-SA')}</p>
+              <hr>
+              <p><strong>طلب المورد:</strong> ${supplierOrder.orderNumber} (${supplierOrder.supplierName})</p>
+              <p><strong>طلب العميل:</strong> ${customerOrder.orderNumber} (${customerOrder.customerName})</p>
+              <p><strong>الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+              <p><strong>القيمة:</strong> ${mergedOrder.totalPrice ? mergedOrder.totalPrice.toLocaleString('ar-SA') : 0} ريال</p>
+            </div>
+          </div>
+        `;
+        
+        sendEmailPromises.push(
+          sendEmail({
+            to: adminEmails,
+            subject: `📋 تم دمج طلبين: ${supplierOrder.orderNumber} مع ${customerOrder.orderNumber}`,
+            html: adminEmailTemplate,
+          })
+        );
+      }
+      
+      // إرسال جميع الإيميلات
+      await Promise.all(sendEmailPromises);
+      
+    } catch (emailError) {
+      console.error('❌ Failed to send merge emails:', emailError.message);
+      // لا نوقف العملية إذا فشل الإيميل
+    }
+
+    // =========================
+    // ✅ تأكيد العملية
+    // =========================
+    await session.commitTransaction();
+    session.endSession();
+
+    // =========================
+    // 📊 الاستجابة
     // =========================
     return res.status(200).json({
       success: true,
       message: 'تم دمج الطلبات بنجاح',
-      mergedOrder,
+      data: {
+        mergedOrder: {
+          _id: mergedOrder._id,
+          orderNumber: mergedOrder.orderNumber,
+          status: mergedOrder.status,
+          mergeStatus: mergedOrder.mergeStatus,
+          supplierName: mergedOrder.supplierName,
+          customerName: mergedOrder.customerName,
+          quantity: mergedOrder.quantity,
+          unit: mergedOrder.unit,
+          fuelType: mergedOrder.fuelType,
+          totalPrice: mergedOrder.totalPrice,
+          createdAt: mergedOrder.createdAt
+        },
+        supplierOrder: {
+          _id: supplierOrder._id,
+          orderNumber: supplierOrder.orderNumber,
+          status: supplierOrder.status,
+          mergeStatus: supplierOrder.mergeStatus,
+          mergedWith: supplierOrder.mergedWithInfo,
+          updatedAt: supplierOrder.updatedAt
+        },
+        customerOrder: {
+          _id: customerOrder._id,
+          orderNumber: customerOrder.orderNumber,
+          status: customerOrder.status,
+          mergeStatus: customerOrder.mergeStatus,
+          mergedWith: customerOrder.mergedWithInfo,
+          supplierOrderNumber: customerOrder.supplierOrderNumber,
+          updatedAt: customerOrder.updatedAt
+        }
+      }
     });
 
   } catch (error) {
+    // =========================
+    // ❌ معالجة الأخطاء
+    // =========================
+    await session.abortTransaction();
+    session.endSession();
+    
     console.error('❌ Error merging orders:', error);
+    
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء دمج الطلبات',
-      error: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
-
 
 
 
