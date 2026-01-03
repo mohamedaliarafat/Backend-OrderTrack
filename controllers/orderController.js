@@ -1058,7 +1058,9 @@ exports.updateOrder = async (req, res) => {
         return res.status(404).json({ error: 'الطلب غير موجود' });
       }
 
-      // الحقول المسموح تعديلها
+      // ============================================
+      // 🧩 الحقول المسموح تعديلها
+      // ============================================
       const allowedUpdates = [
         'driver', 'driverName', 'driverPhone', 'vehicleNumber',
         'notes', 'supplierNotes', 'customerNotes', 'internalNotes',
@@ -1077,7 +1079,9 @@ exports.updateOrder = async (req, res) => {
         }
       });
 
-      // معالجة تغيير السائق
+      // ============================================
+      // 🚚 تغيير السائق
+      // ============================================
       if ('driver' in updates) {
         if (updates.driver) {
           const driver = await Driver.findById(updates.driver);
@@ -1093,10 +1097,14 @@ exports.updateOrder = async (req, res) => {
         }
       }
 
-      // معالجة تغيير الموقع
-      if (('city' in updates || 'area' in updates || 'address' in updates) && 
-          order.customer && typeof order.customer === 'object') {
-        // تحديث بيانات العميل مع الموقع الجديد
+      // ============================================
+      // 📍 تحديث موقع العميل
+      // ============================================
+      if (
+        ('city' in updates || 'area' in updates || 'address' in updates) &&
+        order.customer &&
+        typeof order.customer === 'object'
+      ) {
         await Customer.findByIdAndUpdate(order.customer._id, {
           city: updates.city || order.customer.city,
           area: updates.area || order.customer.area,
@@ -1104,11 +1112,15 @@ exports.updateOrder = async (req, res) => {
         });
       }
 
-      // معالجة التواريخ
+      // ============================================
+      // 📅 التواريخ
+      // ============================================
       if (updates.loadingDate) updates.loadingDate = new Date(updates.loadingDate);
       if (updates.arrivalDate) updates.arrivalDate = new Date(updates.arrivalDate);
 
-      // معالجة الملفات
+      // ============================================
+      // 📎 الملفات
+      // ============================================
       if (req.files) {
         if (req.files.attachments) {
           const newAttachments = req.files.attachments.map((file) => ({
@@ -1141,68 +1153,66 @@ exports.updateOrder = async (req, res) => {
         }
       }
 
-      // معالجة وقت الوصول الفعلي
-      if ('actualArrivalTime' in updates) {
-        if (updates.actualArrivalTime) {
-          const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-          if (!timeRegex.test(updates.actualArrivalTime)) {
-            return res.status(400).json({
-              error: 'تنسيق الوقت غير صحيح. استخدم HH:MM',
-            });
+      // ============================================
+      // ⏱️ وقت الوصول الفعلي + منطق التنفيذ التلقائي
+      // ============================================
+      if ('actualArrivalTime' in updates && updates.actualArrivalTime) {
+        const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(updates.actualArrivalTime)) {
+          return res.status(400).json({
+            error: 'تنسيق الوقت غير صحيح. استخدم HH:MM',
+          });
+        }
+
+        if (
+          ['جاهز للتحميل', 'في انتظار التحميل', 'في الطريق'].includes(order.status)
+        ) {
+          order.loadingCompletedAt = new Date();
+
+          // ⭐ الطلب المدمج → تنفيذ تلقائي
+          if (!updates.status) {
+            if (order.orderSource === 'مدمج') {
+              updates.status = 'تم التنفيذ';
+              updates.mergeStatus = 'مكتمل';
+              order.completedAt = new Date();
+            } else {
+              updates.status = 'تم التحميل';
+            }
           }
+        }
+      }
 
-      // ⏱️ معالجة وقت التحميل الفعلي
-if (
-  ['جاهز للتحميل', 'في انتظار التحميل', 'في الطريق'].includes(order.status)
-) {
-  order.loadingCompletedAt = new Date();
-
-  // لو مفيش status جاي من الفرونت
-  if (!updates.status) {
-    if (order.orderSource === 'مدمج') {
-      updates.status = 'تم التنفيذ';
-      updates.mergeStatus = 'مكتمل';
-      order.completedAt = new Date();
-    } else {
-      updates.status = 'تم التحميل';
-    }
-  }
-}
-
-
-
-      // حفظ القيم القديمة
+      // ============================================
+      // 🧾 حفظ القيم القديمة
+      // ============================================
       const oldData = { ...order.toObject() };
 
-      // تحديث الطلب
+      // ============================================
+      // 💾 تحديث الطلب
+      // ============================================
       Object.assign(order, updates);
       order.updatedAt = new Date();
       await order.save();
 
-      // حساب التغييرات
+      // ============================================
+      // 📝 حساب التغييرات
+      // ============================================
       const changes = {};
       const excludedKeys = ['attachments', 'supplierDocuments', 'customerDocuments', 'updatedAt'];
-      
+
       Object.keys(updates).forEach((key) => {
         if (!excludedKeys.includes(key)) {
-          const oldVal = oldData[key];
-          const newVal = updates[key];
-
-          if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
-            const oldStr = oldVal !== null && oldVal !== undefined && oldVal !== '' ? 
-              (typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal.toString()) : 'غير محدد';
-
-            const newStr = newVal !== null && newVal !== undefined && newVal !== '' ? 
-              (typeof newVal === 'object' ? JSON.stringify(newVal) : newVal.toString()) : 'غير محدد';
-
-            changes[key] = `من: ${oldStr} → إلى: ${newStr}`;
+          if (JSON.stringify(oldData[key]) !== JSON.stringify(updates[key])) {
+            changes[key] = `من: ${oldData[key] ?? 'غير محدد'} → إلى: ${updates[key] ?? 'غير محدد'}`;
           }
         }
       });
 
-      // تسجيل Activity
+      // ============================================
+      // 📋 Activity
+      // ============================================
       if (Object.keys(changes).length > 0) {
-        const activity = new Activity({
+        await Activity.create({
           orderId: order._id,
           activityType: 'تعديل',
           description: `تم تعديل الطلب رقم ${order.orderNumber}`,
@@ -1210,34 +1220,11 @@ if (
           performedByName: req.user.name,
           changes,
         });
-        await activity.save();
       }
 
-      // إرسال الإيميل
-      if (Object.keys(changes).length > 0) {
-        try {
-          const populatedForEmail = await Order.findById(order._id)
-            .populate('customer', 'name email')
-            .populate('supplier', 'name email contactPerson')
-            .populate('createdBy', 'name email');
-
-          const emails = await getOrderEmails(populatedForEmail);
-
-          if (!emails || emails.length === 0) {
-            console.log(`⚠️ No valid emails for order update - order ${order.orderNumber}`);
-          } else {
-            await sendEmail({
-              to: emails,
-              subject: `✏️ تحديث على الطلب ${order.orderNumber}`,
-              html: EmailTemplates.orderUpdatedTemplate(populatedForEmail, changes, req.user.name),
-            });
-          }
-        } catch (emailError) {
-          console.error('❌ Failed to send update email:', emailError.message);
-        }
-      }
-
-      // إرجاع البيانات
+      // ============================================
+      // 📤 الرد
+      // ============================================
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone email city area address')
         .populate('supplier', 'name company contactPerson phone address')
@@ -1246,11 +1233,8 @@ if (
 
       return res.json({
         message: 'تم تحديث الطلب بنجاح',
-        order: {
-          ...populatedOrder.toObject(),
-          displayInfo: populatedOrder.getDisplayInfo ? populatedOrder.getDisplayInfo() : null
-        },
-        changes: Object.keys(changes).length > 0 ? changes : null,
+        order: populatedOrder,
+        changes: Object.keys(changes).length ? changes : null,
       });
     });
   } catch (error) {
