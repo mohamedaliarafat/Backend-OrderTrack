@@ -1151,14 +1151,27 @@ exports.updateOrder = async (req, res) => {
             });
           }
 
-          if (['جاهز للتحميل', 'في انتظار التحميل', 'في الطريق'].includes(order.status)) {
-            order.loadingCompletedAt = new Date();
-            if (!updates.status) {
-              updates.status = 'تم التحميل';
-            }
-          }
-        }
-      }
+          if (
+  ['جاهز للتحميل', 'في انتظار التحميل', 'في الطريق'].includes(order.status)
+) {
+  order.loadingCompletedAt = new Date();
+
+- if (!updates.status) {
+-   updates.status = 'تم التحميل';
+- }
+
++ // 🟢 الطلبات المدمجة لا تدخل "تم التحميل"
++ if (!updates.status) {
++   if (order.orderSource === 'مدمج') {
++     updates.status = 'تم التنفيذ';
++     updates.mergeStatus = 'مكتمل';
++     order.completedAt = new Date();
++   } else {
++     updates.status = 'تم التحميل';
++   }
++ }
+}
+
 
       // حفظ القيم القديمة
       const oldData = { ...order.toObject() };
