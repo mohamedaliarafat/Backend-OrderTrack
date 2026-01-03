@@ -1269,6 +1269,46 @@ exports.updateOrderStatus = async (req, res) => {
 
     const oldStatus = order.status;
 
+    const isSystemAuto =
+      req.headers['x-system-auto'] === 'true' ||
+      req.user?.role === 'system';
+
+    if (
+      isSystemAuto &&
+      order.orderSource === 'مدمج' &&
+      status === 'تم التنفيذ'
+    ) {
+      order.status = 'تم التنفيذ';
+      order.mergeStatus = 'مكتمل';
+      order.completedAt = new Date();
+      order.updatedAt = new Date();
+
+      await order.save();
+
+      const activity = new Activity({
+        orderId: order._id,
+        activityType: 'تغيير حالة',
+        description: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا بواسطة النظام`,
+        performedBy: null,
+        performedByName: 'النظام',
+        changes: {
+          الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`,
+        },
+      });
+      await activity.save();
+
+      return res.json({
+        success: true,
+        message: 'تم تنفيذ الطلب المدمج تلقائيًا',
+        data: {
+          order,
+          oldStatus,
+          newStatus: 'تم التنفيذ',
+          auto: true,
+        },
+      });
+    }
+
     // التحقق من أن الحالة لم تتغير
     if (oldStatus === status) {
       return res.json({
