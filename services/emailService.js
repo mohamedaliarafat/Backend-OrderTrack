@@ -19,7 +19,8 @@ exports.sendEmail = async ({ to, subject, html }) => {
   try {
     const response = await resend.emails.send({
       // ✅ sender مضمون
-      from: "Resend <onboarding@resend.dev>",
+      from: "شركة البحيرة العربية <no-reply@albuheiraalarabia.com>",
+      // from: "اشركة البحيرة العربية <onboarding@resend.dev>",
       to,
       subject,
       html,
