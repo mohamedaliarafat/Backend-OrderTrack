@@ -2404,110 +2404,109 @@ exports.checkArrivalNotifications = async () => {
 // ✅ التحقق من اكتمال التحميل
 // ============================================
 
+// ============================================
+// ✅ التحقق من اكتمال التنفيذ للطلبات المدمجة
+// ============================================
+
 exports.checkCompletedLoading = async () => {
   try {
     const now = new Date();
 
-    // الطلبات التي انتهى وقت تحميلها ولم تُنفّذ بعد
     const orders = await Order.find({
-      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'تم التحميل', 'في الطريق', 'تم التسليم', 'تم الدمج', 'مخصص للعميل'] },
-      loadingCompletedAt: { $exists: false },
       orderSource: 'مدمج',
+      status: { 
+        $in: [
+          'تم الدمج',
+          'مخصص للعميل',
+          'جاهز للتحميل',
+          'في انتظار التحميل',
+          'تم التحميل',
+          'في الطريق',
+          'تم التسليم'
+        ] 
+      },
+      completedAt: { $exists: false }
     })
       .populate('customer', 'name email')
-      .populate('supplier', 'name email contactPerson')
+      .populate('supplier', 'name email')
       .populate('createdBy', 'name email');
 
+    if (!orders.length) return;
+
+    const User = require('../models/User');
     const Notification = require('../models/Notification');
     const Activity = require('../models/Activity');
-    const User = require('../models/User');
 
     for (const order of orders) {
-      if (!order.getFullLoadingDateTime) continue;
 
-      const loadingDateTime = order.getFullLoadingDateTime();
+      // 🛑 Guard مهم جدًا
+      if (!order.getFullArrivalDateTime) continue;
 
-      // ⏰ بعد يوم كامل من انتهاء وقت التحميل
-      const oneDayAfterLoading = new Date(loadingDateTime);
-      oneDayAfterLoading.setDate(oneDayAfterLoading.getDate() + 1);
+      const arrivalDateTime = order.getFullArrivalDateTime();
+      if (!arrivalDateTime) continue;
+
+      // ⏰ بعد انتهاء وقت الوصول
+      if (now < arrivalDateTime) continue;
 
       const oldStatus = order.status;
 
-      // =========================
-      // ✅ الشرط النهائي
-      // =========================
-      if (now < oneDayAfterLoading) continue;
-
-      // =========================
-      // 🔄 تحديث مباشر (System Job)
-      // =========================
+      // ✅ تنفيذ مباشر بدون أي statusFlow
       order.status = 'تم التنفيذ';
       order.mergeStatus = 'مكتمل';
       order.completedAt = now;
-      order.loadingCompletedAt = now;
       order.updatedAt = now;
 
       await order.save();
 
       console.log(
-        `✅ Auto completed merged order ${order.orderNumber} from "${oldStatus}" to "تم التنفيذ"`
+        `✅ Auto executed merged order ${order.orderNumber} from "${oldStatus}" to "تم التنفيذ"`
       );
-
-      // =========================
-      // 👥 Admin + Manager
-      // =========================
-      const adminUsers = await User.find({
-        role: { $in: ['admin', 'manager'] },
-        isActive: true,
-      });
 
       // =========================
       // 🔔 Notification
       // =========================
-      if (adminUsers.length > 0) {
-        const notification = new Notification({
+      const adminUsers = await User.find({
+        role: { $in: ['admin', 'manager'] },
+        isActive: true
+      });
+
+      if (adminUsers.length) {
+        await Notification.create({
           type: 'execution_completed',
           title: 'تم التنفيذ',
-          message: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا بعد مرور يوم كامل من انتهاء التحميل`,
+          message: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا بعد انتهاء وقت التوصيل`,
           data: {
             orderId: order._id,
             orderNumber: order.orderNumber,
-            customerName: order.customerName,
             oldStatus,
             newStatus: 'تم التنفيذ',
-            auto: true,
-            isMerged: true,
+            auto: true
           },
-          recipients: adminUsers.map((u) => ({ user: u._id })),
-          createdBy: order.createdBy?._id,
+          recipients: adminUsers.map(u => ({ user: u._id })),
+          createdBy: order.createdBy?._id
         });
-
-        await notification.save();
       }
 
       // =========================
-      // 📝 Activity Log
+      // 📝 Activity
       // =========================
-      const activity = new Activity({
+      await Activity.create({
         orderId: order._id,
         activityType: 'تغيير حالة',
-        description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التنفيذ" بعد مرور يوم من انتهاء التحميل (طلب مدمج)`,
+        description: `تم تنفيذ الطلب تلقائيًا بعد انتهاء وقت التوصيل (طلب مدمج)`,
         performedBy: null,
         performedByName: 'النظام',
         changes: {
-          الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`,
-        },
+          الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`
+        }
       });
 
-      await activity.save();
-
       // =========================
-      // 📧 Email
+      // 📧 Email (اختياري)
       // =========================
       try {
         const emails = await getOrderEmails(order);
-
-        if (emails && emails.length > 0) {
+        if (emails?.length) {
           await sendEmail({
             to: emails,
             subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
@@ -2516,20 +2515,19 @@ exports.checkCompletedLoading = async () => {
               oldStatus,
               'تم التنفيذ',
               'النظام'
-            ),
+            )
           });
         }
-      } catch (emailError) {
-        console.error(
-          `❌ Email failed for order ${order.orderNumber}:`,
-          emailError.message
-        );
+      } catch (e) {
+        console.error(`❌ Email failed for ${order.orderNumber}`, e.message);
       }
     }
+
   } catch (error) {
-    console.error('❌ خطأ في checkCompletedLoading:', error);
+    console.error('❌ Error in checkCompletedLoading:', error);
   }
 };
+
 
 
 
