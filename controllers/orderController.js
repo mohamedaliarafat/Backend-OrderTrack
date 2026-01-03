@@ -112,7 +112,6 @@ exports.createOrder = async (req, res) => {
       const allowedRequestTypes = ['شراء', 'نقل'];
 
       if (orderData.orderSource === 'عميل') {
-        // افتراضي شراء
         orderData.requestType = orderData.requestType || 'شراء';
 
         if (!allowedRequestTypes.includes(orderData.requestType)) {
@@ -121,7 +120,6 @@ exports.createOrder = async (req, res) => {
           });
         }
       } else {
-        // طلب مورد → ممنوع وجود requestType
         delete orderData.requestType;
       }
 
@@ -251,6 +249,40 @@ exports.createOrder = async (req, res) => {
         .populate('createdBy', 'name email')
         .populate('driver', 'name phone vehicleNumber');
 
+      // ==================================================
+      // 📧 إرسال إيميل عند إنشاء الطلب
+      // ==================================================
+      try {
+        const emails = await getOrderEmails(order);
+
+        if (emails && emails.length > 0) {
+          await sendEmail({
+            to: emails,
+            subject:
+              order.orderSource === 'عميل'
+                ? `🆕 تم إنشاء طلب عميل جديد (${order.orderNumber})`
+                : `🆕 تم إنشاء طلب مورد جديد (${order.orderNumber})`,
+            html: `
+              <div dir="rtl" style="font-family: Arial; padding:20px">
+                <h2>🆕 تم إنشاء طلب جديد</h2>
+                <p><strong>رقم الطلب:</strong> ${order.orderNumber}</p>
+                <p><strong>نوع الطلب:</strong> ${order.orderSource}</p>
+                <p><strong>المدينة:</strong> ${order.city} - ${order.area}</p>
+                <p><strong>تم الإنشاء بواسطة:</strong> ${req.user.name}</p>
+              </div>
+            `,
+          });
+        }
+      } catch (emailError) {
+        console.error(
+          `❌ Failed to send order creation email for ${order.orderNumber}:`,
+          emailError.message
+        );
+      }
+
+      // ==================================================
+      // ✅ الاستجابة
+      // ==================================================
       return res.status(201).json({
         message:
           order.orderSource === 'عميل'
