@@ -7,7 +7,6 @@ const EmailTemplates = require('../services/emailTemplates');
 const getOrderEmails = require('../utils/getOrderEmails');
 const Activity = require('../models/Activity');
 const Notification = require('../models/Notification');
-const { safeSendEmail } = require('../services/emailQueue');
 
 const mongoose = require('mongoose');
 const multer = require('multer');
