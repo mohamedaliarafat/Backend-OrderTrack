@@ -2375,8 +2375,9 @@ exports.checkCompletedLoading = async () => {
 
     // الطلبات التي انتهى وقت تحميلها ولم تُنفّذ بعد
     const orders = await Order.find({
-      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل'] },
+      status: { $in: ['في انتظار التحميل', 'جاهز للتحميل', 'تم التحميل', 'في الطريق', 'تم التسليم', 'تم الدمج', 'مخصص للعميل'] },
       loadingCompletedAt: { $exists: false },
+      orderSource: 'مدمج',
     })
       .populate('customer', 'name email')
       .populate('supplier', 'name email contactPerson')
@@ -2387,33 +2388,48 @@ exports.checkCompletedLoading = async () => {
     const User = require('../models/User');
 
     for (const order of orders) {
+      if (!order.getFullLoadingDateTime) continue;
+
       const loadingDateTime = order.getFullLoadingDateTime();
 
       // ⏰ بعد يوم كامل من انتهاء وقت التحميل
       const oneDayAfterLoading = new Date(loadingDateTime);
       oneDayAfterLoading.setDate(oneDayAfterLoading.getDate() + 1);
 
-      /**
-       * ✅ الشرط الجديد:
-       * - الوقت عدى يوم كامل بعد التحميل
-       * - الطلب مدمج فقط
-       */
-    if (
-  now >= oneDayAfterLoading &&
-  order.orderSource === 'مدمج' &&
-  ['تم التسليم', 'في الطريق', 'تم التحميل'].includes(order.status)
-) {
+      const oldStatus = order.status;
 
-        order.loadingCompletedAt = now;
-        await order.save();
+      // =========================
+      // ✅ الشرط النهائي
+      // =========================
+      if (now < oneDayAfterLoading) continue;
 
-        // Admin + Manager
-        const adminUsers = await User.find({
-          role: { $in: ['admin', 'manager'] },
-          isActive: true,
-        });
+      // =========================
+      // 🔄 تحديث مباشر (System Job)
+      // =========================
+      order.status = 'تم التنفيذ';
+      order.mergeStatus = 'مكتمل';
+      order.completedAt = now;
+      order.loadingCompletedAt = now;
+      order.updatedAt = now;
 
-        // 🔔 Notification
+      await order.save();
+
+      console.log(
+        `✅ Auto completed merged order ${order.orderNumber} from "${oldStatus}" to "تم التنفيذ"`
+      );
+
+      // =========================
+      // 👥 Admin + Manager
+      // =========================
+      const adminUsers = await User.find({
+        role: { $in: ['admin', 'manager'] },
+        isActive: true,
+      });
+
+      // =========================
+      // 🔔 Notification
+      // =========================
+      if (adminUsers.length > 0) {
         const notification = new Notification({
           type: 'execution_completed',
           title: 'تم التنفيذ',
@@ -2430,46 +2446,48 @@ exports.checkCompletedLoading = async () => {
           recipients: adminUsers.map((u) => ({ user: u._id })),
           createdBy: order.createdBy?._id,
         });
+
         await notification.save();
+      }
 
-        // 📝 Activity Log
-        const activity = new Activity({
-          orderId: order._id,
-          activityType: 'تغيير حالة',
-          description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التنفيذ" بعد مرور يوم من انتهاء التحميل (طلب مدمج)`,
-          performedBy: null,
-          performedByName: 'النظام',
-          changes: {
-            الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`,
-          },
-        });
-        await activity.save();
+      // =========================
+      // 📝 Activity Log
+      // =========================
+      const activity = new Activity({
+        orderId: order._id,
+        activityType: 'تغيير حالة',
+        description: `تم تحديث حالة الطلب ${order.orderNumber} تلقائيًا إلى "تم التنفيذ" بعد مرور يوم من انتهاء التحميل (طلب مدمج)`,
+        performedBy: null,
+        performedByName: 'النظام',
+        changes: {
+          الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`,
+        },
+      });
 
-        // 📧 Email للعميل المدمج
-        try {
-          const emails = await getOrderEmails(order);
+      await activity.save();
 
-          if (emails && emails.length > 0) {
-            await sendEmail({
-              to: emails,
-              subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
-              html: EmailTemplates.orderStatusTemplate(
-                order,
-                oldStatus,
-                'تم التنفيذ',
-                'النظام'
-              ),
-            });
-          }
-        } catch (emailError) {
-          console.error(
-            `❌ Email failed for order ${order.orderNumber}:`,
-            emailError.message
-          );
+      // =========================
+      // 📧 Email
+      // =========================
+      try {
+        const emails = await getOrderEmails(order);
+
+        if (emails && emails.length > 0) {
+          await sendEmail({
+            to: emails,
+            subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
+            html: EmailTemplates.orderStatusTemplate(
+              order,
+              oldStatus,
+              'تم التنفيذ',
+              'النظام'
+            ),
+          });
         }
-
-        console.log(
-          `✅ Order ${order.orderNumber} marked as "تم التنفيذ" after 1 day (merged order)`
+      } catch (emailError) {
+        console.error(
+          `❌ Email failed for order ${order.orderNumber}:`,
+          emailError.message
         );
       }
     }
@@ -2477,6 +2495,9 @@ exports.checkCompletedLoading = async () => {
     console.error('❌ خطأ في checkCompletedLoading:', error);
   }
 };
+
+
+
 // ============================================
 // 📊 إحصائيات الطلبات
 // ============================================
