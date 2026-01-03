@@ -1,7 +1,8 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
-
+const { safeSendEmail } = require('../services/emailQueue');
+const { sendEmail } = require('../services/emailService');
 
 const generateToken = (userId) => {
   return jwt.sign(
@@ -11,6 +12,9 @@ const generateToken = (userId) => {
   );
 };
 
+// ======================
+// 📝 Register
+// ======================
 exports.register = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -20,13 +24,11 @@ exports.register = async (req, res) => {
 
     const { name, email, password, company, phone, role } = req.body;
 
-    // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'البريد الإلكتروني مستخدم بالفعل' });
     }
 
-    // Create user
     const user = new User({
       name,
       email,
@@ -38,7 +40,6 @@ exports.register = async (req, res) => {
 
     await user.save();
 
-    // Generate token
     const token = generateToken(user._id);
 
     res.status(201).json({
@@ -57,24 +58,53 @@ exports.register = async (req, res) => {
   }
 };
 
+// ======================
+// 🔐 Login + Welcome Email
+// ======================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
     }
 
-    // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
     }
 
-    // Generate token
     const token = generateToken(user._id);
+
+    // ======================
+    // 📧 إرسال رسالة ترحيب
+    // ======================
+    try {
+      await safeSendEmail(() =>
+        sendEmail({
+          to: [user.email],
+          subject: '🎉 مرحبًا بك في البحيرة العربية',
+          html: `
+            <div style="font-family:Arial;padding:20px">
+              <h2>مرحبًا ${user.name} 👋</h2>
+              <p>
+                سعداء بتسجيل دخولك إلى نظام <strong>البحيرة العربية</strong>.
+              </p>
+              <p>
+                نتمنى لك تجربة موفقة، وإذا احتجت أي مساعدة لا تتردد في التواصل معنا.
+              </p>
+              <hr />
+              <p style="color:#666;font-size:12px">
+                هذا البريد تم إرساله تلقائيًا بعد تسجيل الدخول.
+              </p>
+            </div>
+          `,
+        })
+      );
+    } catch (emailError) {
+      console.error('❌ Failed to send login welcome email:', emailError.message);
+    }
 
     res.json({
       message: 'تم تسجيل الدخول بنجاح',
@@ -92,6 +122,9 @@ exports.login = async (req, res) => {
   }
 };
 
+// ======================
+// 👤 Profile
+// ======================
 exports.getProfile = async (req, res) => {
   try {
     res.json({
