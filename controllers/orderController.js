@@ -1321,7 +1321,7 @@ exports.updateOrderStatus = async (req, res) => {
       'تم التحميل': ['في الطريق', 'ملغى'],
       'في الطريق': ['تم التسليم', 'ملغى'],
       'تم التسليم': ['تم التنفيذ', 'ملغى'],
-      'تم التنفيذ': ['مكتمل']
+'تم التنفيذ': ['مكتمل'],
     };
 
     // التحقق من أن الانتقال مسموح
@@ -2384,14 +2384,12 @@ exports.checkCompletedLoading = async () => {
        * - الوقت عدى يوم كامل بعد التحميل
        * - الطلب مدمج فقط
        */
-      if (
-        now >= oneDayAfterLoading &&
-        order.orderSource === 'مدمج'
-      ) {
-        const oldStatus = order.status;
+    if (
+  now >= oneDayAfterLoading &&
+  order.orderSource === 'مدمج' &&
+  ['تم التسليم', 'في الطريق', 'تم التحميل'].includes(order.status)
+) {
 
-        // ✅ الحالة النهائية
-        order.status = 'تم التنفيذ';
         order.loadingCompletedAt = now;
         await order.save();
 
