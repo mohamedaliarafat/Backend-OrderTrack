@@ -7,5 +7,6 @@ router.use(authMiddleware);
 
 router.get('/', activityController.getActivities);
 router.post('/', activityController.addActivity);
+router.get('/order/:orderId', activityController.getActivitiesByOrder);
 
 module.exports = router;
