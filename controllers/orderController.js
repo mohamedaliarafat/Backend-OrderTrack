@@ -77,6 +77,248 @@ function formatDuration(milliseconds) {
 // 📦 إنشاء طلب جديد (مع دعم شراء / نقل)
 // ============================================
 
+// exports.createOrder = async (req, res) => {
+//   try {
+//     upload(req, res, async (err) => {
+//       if (err) {
+//         return res.status(400).json({ error: err.message });
+//       }
+
+//       const orderData = { ...req.body };
+
+//       // ==================================================
+//       // 🚫 امنع إدخال status / orderNumber يدويًا
+//       // ==================================================
+//       delete orderData.status;
+//       delete orderData.orderNumber;
+
+//       // ==================================================
+//       // 🧭 تحديد مصدر الطلب
+//       // ==================================================
+//       orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
+
+//       // ==================================================
+//       // 👤 العميل مطلوب لطلبات العملاء
+//       // ==================================================
+//       if (orderData.orderSource === 'عميل' && !orderData.customer) {
+//         return res.status(400).json({
+//           error: 'العميل مطلوب لطلبات العملاء',
+//         });
+//       }
+
+//       // ==================================================
+//       // ✅ نوع العملية (شراء | نقل) — للعملاء فقط
+//       // ==================================================
+//       const allowedRequestTypes = ['شراء', 'نقل'];
+
+//       if (orderData.orderSource === 'عميل') {
+//         orderData.requestType = orderData.requestType || 'شراء';
+
+//         if (!allowedRequestTypes.includes(orderData.requestType)) {
+//           return res.status(400).json({
+//             error: 'نوع العملية غير صحيح (يجب أن يكون شراء أو نقل)',
+//           });
+//         }
+//       } else {
+//         delete orderData.requestType;
+//       }
+
+//       // ==================================================
+//       // 🚚 شرط النقل: سائق (طلب عميل + نقل فقط)
+//       // ==================================================
+//       if (
+//         orderData.orderSource === 'عميل' &&
+//         orderData.requestType === 'نقل' &&
+//         !orderData.driver
+//       ) {
+//         return res.status(400).json({
+//           error: 'طلبات النقل تتطلب تعيين سائق',
+//         });
+//       }
+
+//       // ==================================================
+//       // ⏰ التحقق من الأوقات
+//       // ==================================================
+//       if (
+//         !orderData.loadingDate ||
+//         !orderData.loadingTime ||
+//         !orderData.arrivalDate ||
+//         !orderData.arrivalTime
+//       ) {
+//         return res.status(400).json({ error: 'جميع الأوقات مطلوبة' });
+//       }
+
+//       const loadingDateTime = new Date(
+//         `${orderData.loadingDate}T${orderData.loadingTime}`
+//       );
+//       const arrivalDateTime = new Date(
+//         `${orderData.arrivalDate}T${orderData.arrivalTime}`
+//       );
+
+//       if (arrivalDateTime <= loadingDateTime) {
+//         return res.status(400).json({
+//           error: 'وقت الوصول يجب أن يكون بعد وقت التحميل',
+//         });
+//       }
+
+//       // ==================================================
+//       // 👤 بيانات المُنشئ
+//       // ==================================================
+//       orderData.createdBy = req.user._id;
+//       orderData.createdByName = req.user.name;
+
+//       // ==================================================
+//       // 👥 بيانات العميل (لو طلب عميل)
+//       // ==================================================
+//       if (orderData.orderSource === 'عميل') {
+//         const customerDoc = await Customer.findById(orderData.customer);
+//         if (!customerDoc) {
+//           return res.status(400).json({ error: 'العميل غير موجود' });
+//         }
+
+//         orderData.customerName = customerDoc.name;
+//         orderData.customerCode = customerDoc.code;
+//         orderData.customerPhone = customerDoc.phone;
+//         orderData.customerEmail = customerDoc.email;
+
+//         orderData.city = orderData.city || customerDoc.city;
+//         orderData.area = orderData.area || customerDoc.area;
+//         orderData.address = orderData.address ?? null;
+//       }
+
+//       // ==================================================
+//       // 🏢 بيانات المورد (لو طلب مورد)
+//       // ==================================================
+//       if (orderData.orderSource === 'مورد' && orderData.supplier) {
+//         const supplierDoc = await Supplier.findById(orderData.supplier);
+//         if (!supplierDoc) {
+//           return res.status(400).json({ error: 'المورد غير موجود' });
+//         }
+
+//         orderData.supplierName = supplierDoc.name;
+//         orderData.supplierCompany = supplierDoc.company;
+//         orderData.supplierContactPerson = supplierDoc.contactPerson;
+//         orderData.supplierPhone = supplierDoc.phone;
+
+//         orderData.city = orderData.city || supplierDoc.city;
+//         orderData.area = orderData.area || supplierDoc.area;
+//         orderData.address = orderData.address ?? null;
+//       }
+
+//       // ==================================================
+//       // 🛡️ تحقق نهائي للموقع
+//       // ==================================================
+//       if (!orderData.city || !orderData.area) {
+//         return res.status(400).json({
+//           error: 'المدينة والمنطقة مطلوبة لإنشاء الطلب',
+//           debug: {
+//             city: orderData.city,
+//             area: orderData.area,
+//           },
+//         });
+//       }
+
+//       // ==================================================
+//       // 📅 تحويل التواريخ
+//       // ==================================================
+//       orderData.orderDate = new Date(orderData.orderDate || new Date());
+//       orderData.loadingDate = new Date(orderData.loadingDate);
+//       orderData.arrivalDate = new Date(orderData.arrivalDate);
+
+//       // ==================================================
+//       // 📎 الملفات
+//       // ==================================================
+//       if (req.files?.attachments) {
+//         orderData.attachments = req.files.attachments.map((file) => ({
+//           filename: file.originalname,
+//           path: file.path,
+//           uploadedAt: new Date(),
+//           uploadedBy: req.user._id,
+//         }));
+//       }
+
+//       // ==================================================
+//       // 🧾 إنشاء الطلب
+//       // ==================================================
+//      const order = new Order(orderData);
+
+// try {
+//   await order.save();
+// } catch (error) {
+//   // 🔐 رقم طلب المورد مكرر
+//   if (
+//     error.code === 11000 &&
+//     (error.keyPattern?.supplierOrderNumber ||
+//      error.keyValue?.supplierOrderNumber)
+//   ) {
+//     return res.status(400).json({
+//       error: 'رقم طلب المورد مستخدم من قبل'
+//     });
+//   }
+
+//   console.error('❌ Error saving order:', error);
+//   return res.status(500).json({
+//     error: 'فشل في حفظ الطلب'
+//   });
+// }
+
+
+
+//       const populatedOrder = await Order.findById(order._id)
+//         .populate('customer', 'name code phone city area')
+//         .populate('supplier', 'name company city area')
+//         .populate('createdBy', 'name email')
+//         .populate('driver', 'name phone vehicleNumber');
+
+//       // ==================================================
+//       // 📧 إرسال إيميل عند إنشاء الطلب
+//       // ==================================================
+//       try {
+//         const emails = await getOrderEmails(order);
+
+//         if (emails && emails.length > 0) {
+//           await sendEmail({
+//             to: emails,
+//             subject:
+//               order.orderSource === 'عميل'
+//                 ? `🆕 تم إنشاء طلب عميل جديد (${order.orderNumber})`
+//                 : `🆕 تم إنشاء طلب مورد جديد (${order.orderNumber})`,
+//             html: `
+//               <div dir="rtl" style="font-family: Arial; padding:20px">
+//                 <h2>🆕 تم إنشاء طلب جديد</h2>
+//                 <p><strong>رقم الطلب:</strong> ${order.orderNumber}</p>
+//                 <p><strong>نوع الطلب:</strong> ${order.orderSource}</p>
+//                 <p><strong>المدينة:</strong> ${order.city} - ${order.area}</p>
+//                 <p><strong>تم الإنشاء بواسطة:</strong> ${req.user.name}</p>
+//               </div>
+//             `,
+//           });
+//         }
+//       } catch (emailError) {
+//         console.error(
+//           `❌ Failed to send order creation email for ${order.orderNumber}:`,
+//           emailError.message
+//         );
+//       }
+
+//       // ==================================================
+//       // ✅ الاستجابة
+//       // ==================================================
+//       return res.status(201).json({
+//         message:
+//           order.orderSource === 'عميل'
+//             ? 'تم إنشاء طلب العميل بنجاح'
+//             : 'تم إنشاء طلب المورد بنجاح',
+//         order: populatedOrder,
+//       });
+//     });
+//   } catch (error) {
+//     console.error('❌ Error creating order:', error);
+//     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+//   }
+// };
+
+
 exports.createOrder = async (req, res) => {
   try {
     upload(req, res, async (err) => {
@@ -96,6 +338,14 @@ exports.createOrder = async (req, res) => {
       // 🧭 تحديد مصدر الطلب
       // ==================================================
       orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
+
+      // ==================================================
+      // ⛔️ رقم طلب المورد مسموح لطلبات المورد فقط
+      // ==================================================
+      if (orderData.orderSource !== 'مورد') {
+        delete orderData.supplierOrderNumber;
+        delete orderData.supplier;
+      }
 
       // ==================================================
       // 👤 العميل مطلوب لطلبات العملاء
@@ -189,7 +439,11 @@ exports.createOrder = async (req, res) => {
       // ==================================================
       // 🏢 بيانات المورد (لو طلب مورد)
       // ==================================================
-      if (orderData.orderSource === 'مورد' && orderData.supplier) {
+      if (orderData.orderSource === 'مورد') {
+        if (!orderData.supplier) {
+          return res.status(400).json({ error: 'المورد مطلوب لطلبات المورد' });
+        }
+
         const supplierDoc = await Supplier.findById(orderData.supplier);
         if (!supplierDoc) {
           return res.status(400).json({ error: 'المورد غير موجود' });
@@ -240,29 +494,30 @@ exports.createOrder = async (req, res) => {
       // ==================================================
       // 🧾 إنشاء الطلب
       // ==================================================
-     const order = new Order(orderData);
+      const order = new Order(orderData);
 
-try {
-  await order.save();
-} catch (error) {
-  // 🔐 رقم طلب المورد مكرر
-  if (
-    error.code === 11000 &&
-    (error.keyPattern?.supplierOrderNumber ||
-     error.keyValue?.supplierOrderNumber)
-  ) {
-    return res.status(400).json({
-      error: 'رقم طلب المورد مستخدم من قبل'
-    });
-  }
+      try {
+        await order.save();
+      } catch (error) {
+        // 🔐 رقم طلب المورد مكرر (index مركب)
+        if (
+          error.code === 11000 &&
+          (
+            error.keyPattern?.supplierOrderNumber ||
+            error.keyPattern?.supplier ||
+            error.keyValue?.supplierOrderNumber
+          )
+        ) {
+          return res.status(400).json({
+            error: 'رقم طلب المورد مستخدم من قبل لهذا المورد'
+          });
+        }
 
-  console.error('❌ Error saving order:', error);
-  return res.status(500).json({
-    error: 'فشل في حفظ الطلب'
-  });
-}
-
-
+        console.error('❌ Error saving order:', error);
+        return res.status(500).json({
+          error: 'فشل في حفظ الطلب'
+        });
+      }
 
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone city area')
@@ -317,6 +572,7 @@ try {
     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // ============================================
 // 📋 جلب جميع الطلبات
