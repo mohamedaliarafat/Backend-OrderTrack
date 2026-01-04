@@ -1,15 +1,28 @@
-const { Resend } = require("resend");
+const nodemailer = require('nodemailer');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ===============================
+// ⚙️ SMTP Configuration
+// ===============================
+const transporter = nodemailer.createTransport({
+  host: 'mail-eu.smtp2go.com',
+  port: 587, // أو 2525
+  secure: false, // TLS
+  auth: {
+    user: process.env.SMTP_USER, // albuheiraalarabia.com
+    pass: process.env.SMTP_PASS, // SMTP password
+  },
+});
 
-// الدومين المعتمد
-const VERIFIED_DOMAIN = "albuheiraalarabia.com";
-const DEFAULT_FROM = "شركة البحيرة العربية <no-reply@albuheiraalarabia.com>";
-const DEFAULT_REPLY_TO = "nasser@albuheiraalarabia.com";
+// ===============================
+// 📧 Email Constants
+// ===============================
+const VERIFIED_DOMAIN = 'albuheiraalarabia.com';
+const DEFAULT_FROM = 'شركة البحيرة العربية <no-reply@albuheiraalarabia.com>';
+const DEFAULT_REPLY_TO = 'nasser@albuheiraalarabia.com';
 
-/**
- * تنظيف الإيميلات (تحويلها لمصفوفة + إزالة الفارغ + lowercase)
- */
+// ===============================
+// 🧹 Normalize Emails
+// ===============================
 const normalizeEmails = (to) => {
   if (!to) return [];
 
@@ -17,44 +30,40 @@ const normalizeEmails = (to) => {
 
   return emails
     .map((e) => String(e).trim().toLowerCase())
-    .filter((e) => e && e.includes("@"));
+    .filter((e) => e && e.includes('@'));
 };
 
-/**
- * إرسال إيميل عام (Production Safe)
- */
+// ===============================
+// 📤 Send Email (Production Safe)
+// ===============================
 exports.sendEmail = async ({ to, subject, html, replyTo }) => {
   const recipients = normalizeEmails(to);
 
   if (recipients.length === 0) {
-    console.log("⚠️ sendEmail skipped – no valid recipients");
+    console.log('⚠️ sendEmail skipped – no valid recipients');
     return;
   }
 
-  // حماية من إرسال دومين غير موثّق
-  const fromDomain = DEFAULT_FROM.split("@")[1]?.replace(">", "");
+  // 🛡️ حماية من إرسال من دومين غير موثّق
+  const fromDomain = DEFAULT_FROM.split('@')[1]?.replace('>', '');
   if (fromDomain !== VERIFIED_DOMAIN) {
-    console.error("❌ Invalid FROM domain:", fromDomain);
+    console.error('❌ Invalid FROM domain:', fromDomain);
     return;
   }
 
   try {
-    const response = await resend.emails.send({
+    const info = await transporter.sendMail({
       from: DEFAULT_FROM,
-      to: recipients,
+      to: recipients.join(','),
       subject,
       html,
-      reply_to: replyTo || DEFAULT_REPLY_TO,
+      replyTo: replyTo || DEFAULT_REPLY_TO,
     });
 
-    console.log(
-      "📧 Email sent:",
-      response?.id || response?.data?.id || ""
-    );
-
-    return response;
+    console.log('📧 Email sent:', info.messageId);
+    return info;
   } catch (error) {
-    console.error("❌ Email error:", error.message);
+    console.error('❌ Email error:', error.message);
     throw error;
   }
 };
