@@ -1115,6 +1115,7 @@ exports.updateOrder = async (req, res) => {
       // 🧩 الحقول المسموح تعديلها
       // ============================================
       const allowedUpdates = [
+        'customer', // ⭐ تمت الإضافة
         'driver', 'driverName', 'driverPhone', 'vehicleNumber',
         'notes', 'supplierNotes', 'customerNotes', 'internalNotes',
         'actualArrivalTime', 'loadingDuration', 'delayReason',
@@ -1131,6 +1132,30 @@ exports.updateOrder = async (req, res) => {
           updates[key] = req.body[key] !== undefined ? req.body[key] : null;
         }
       });
+
+      // ============================================
+      // 👤 تغيير العميل (مضاف بدون حذف أي منطق)
+      // ============================================
+      const oldCustomerId = order.customer?._id?.toString();
+
+      if (updates.customer && updates.customer !== oldCustomerId) {
+        const newCustomer = await Customer.findById(updates.customer);
+
+        if (!newCustomer) {
+          return res.status(400).json({ error: 'العميل الجديد غير موجود' });
+        }
+
+        order.customer = newCustomer._id;
+        order.customerName = newCustomer.name;
+        order.customerCode = newCustomer.code;
+        order.customerPhone = newCustomer.phone;
+        order.customerEmail = newCustomer.email;
+
+        // تحديث الموقع من العميل الجديد إذا لم يُرسل من الفرونت
+        order.city = updates.city ?? newCustomer.city;
+        order.area = updates.area ?? newCustomer.area;
+        order.address = updates.address ?? newCustomer.address;
+      }
 
       // ============================================
       // 🚚 تغيير السائق
@@ -1151,7 +1176,7 @@ exports.updateOrder = async (req, res) => {
       }
 
       // ============================================
-      // 📍 تحديث موقع العميل
+      // 📍 تحديث موقع العميل (كما هو بدون حذف)
       // ============================================
       if (
         ('city' in updates || 'area' in updates || 'address' in updates) &&
@@ -1222,7 +1247,6 @@ exports.updateOrder = async (req, res) => {
         ) {
           order.loadingCompletedAt = new Date();
 
-          // ⭐ الطلب المدمج → تنفيذ تلقائي
           if (!updates.status) {
             if (order.orderSource === 'مدمج') {
               updates.status = 'تم التنفيذ';
@@ -1295,6 +1319,7 @@ exports.updateOrder = async (req, res) => {
     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 // ============================================
 // 🔄 تحديث حالة الطلب
