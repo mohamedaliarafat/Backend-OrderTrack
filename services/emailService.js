@@ -21,7 +21,7 @@ const transporter = nodemailer.createTransport({
 // 📧 Email Constants
 // ===============================
 const VERIFIED_DOMAIN = 'albuheiraalarabia.com';
-const DEFAULT_FROM = 'شركة البحيرة العربية <no-reply@albuheiraalarabia.com>';
+const DEFAULT_FROM = 'شركة البحيرة العربية <nasser_mo@albuhairaalarabia.com>';
 const DEFAULT_REPLY_TO = 'nasser@albuheiraalarabia.com';
 
 // ===============================
