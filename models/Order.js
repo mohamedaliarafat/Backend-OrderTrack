@@ -829,18 +829,18 @@ orderSchema.virtual('isCustomerOrder').get(function() {
 orderSchema.virtual('isMixedOrder').get(function() {
   return this.orderSource === 'مدمج';
 });
-// ============================================
-// 🔐 Unique Index لمنع تكرار رقم طلب المورد
-// ============================================
+
 orderSchema.index(
-  { supplierOrderNumber: 1 },
+  { supplier: 1, supplierOrderNumber: 1 },
   {
     unique: true,
     partialFilterExpression: {
+      supplier: { $exists: true },
       supplierOrderNumber: { $exists: true, $ne: null, $ne: '' }
     }
   }
 );
+
 
 
 module.exports = mongoose.model('Order', orderSchema);
