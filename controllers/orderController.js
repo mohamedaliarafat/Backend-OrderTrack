@@ -240,8 +240,29 @@ exports.createOrder = async (req, res) => {
       // ==================================================
       // 🧾 إنشاء الطلب
       // ==================================================
-      const order = new Order(orderData);
-      await order.save();
+     const order = new Order(orderData);
+
+try {
+  await order.save();
+} catch (error) {
+  // 🔐 رقم طلب المورد مكرر
+  if (
+    error.code === 11000 &&
+    (error.keyPattern?.supplierOrderNumber ||
+     error.keyValue?.supplierOrderNumber)
+  ) {
+    return res.status(400).json({
+      error: 'رقم طلب المورد مستخدم من قبل'
+    });
+  }
+
+  console.error('❌ Error saving order:', error);
+  return res.status(500).json({
+    error: 'فشل في حفظ الطلب'
+  });
+}
+
+
 
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone city area')
