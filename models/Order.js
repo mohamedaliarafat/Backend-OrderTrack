@@ -36,6 +36,13 @@ const orderSchema = new mongoose.Schema({
     enum: ['منفصل', 'في انتظار الدمج', 'مدمج', 'مكتمل'],
     default: 'منفصل'
   },
+
+  // ⭐ هل هذا الطلب نسخة دمج؟
+isMergedCopy: {
+  type: Boolean,
+  default: false
+},
+
   
   // ⭐ معرف الطلب المدمج معه
   mergedWithOrderId: {
