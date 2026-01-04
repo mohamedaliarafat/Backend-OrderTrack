@@ -45,6 +45,22 @@ exports.getActivities = async (req, res) => {
   }
 };
 
+
+exports.getActivitiesByOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const activities = await Activity.find({ orderId })
+      .populate('performedBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(activities);
+  } catch (error) {
+    console.error('❌ getActivitiesByOrder error:', error);
+    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+  }
+};
+
 // Add manual activity
 exports.addActivity = async (req, res) => {
   try {
