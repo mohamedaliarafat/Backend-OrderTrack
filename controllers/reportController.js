@@ -992,7 +992,7 @@ exports.exportPDF = async (req, res) => {
     doc.pipe(res);
 
     // ===============================
-    // 🧾 Header ثابت لكل صفحة
+    // 🧾 Header ثابت
     // ===============================
     const headerOptions = {
       reportTitle: title,
@@ -1006,62 +1006,72 @@ exports.exportPDF = async (req, res) => {
       drawHeader(doc, headerOptions);
     });
 
-    doc.moveDown(8);
+    doc.moveDown(6);
 
     // ===============================
-    // 📌 Summary Box
+    // 📌 Summary
     // ===============================
     sectionTitle(doc, 'الملخص');
 
     const summaryTop = doc.y;
-    box(doc, 40, summaryTop, doc.page.width - 80, 95);
+    softBox(doc, 40, summaryTop, doc.page.width - 80, 100);
 
-    // Arabic (Right)
+    // عربي (يمين)
     doc
       .font('Arabic')
-      .fontSize(10)
+      .fontSize(11)
       .fillColor('#000')
       .text(
-        rtl(`إجمالي العناصر: ${data.summary?.totalCustomers ?? data.summary?.totalUsers ?? data.summary?.totalSuppliers ?? 0}`),
-        doc.page.width - 320,
-        summaryTop + 15,
+        rtl(`إجمالي العناصر: ${
+          data.summary?.totalCustomers ??
+          data.summary?.totalUsers ??
+          data.summary?.totalSuppliers ??
+          0
+        }`),
+        doc.page.width - 300,
+        summaryTop + 20,
         { align: 'right' }
       )
       .text(
         rtl(`إجمالي الطلبات: ${data.summary?.totalOrders ?? 0}`),
-        doc.page.width - 320,
-        summaryTop + 35,
+        doc.page.width - 300,
+        summaryTop + 45,
         { align: 'right' }
       )
       .text(
         rtl(`إجمالي المبلغ: ${data.summary?.totalAmount ?? 0} ريال`),
-        doc.page.width - 320,
-        summaryTop + 55,
+        doc.page.width - 300,
+        summaryTop + 70,
         { align: 'right' }
       );
 
     // English (Left)
     doc
       .font('Helvetica')
-      .fontSize(10)
+      .fontSize(11)
       .fillColor('#000')
       .text(
-        `Total Items: ${data.summary?.totalCustomers ?? data.summary?.totalUsers ?? data.summary?.totalSuppliers ?? 0}`,
+        `Total Items: ${
+          data.summary?.totalCustomers ??
+          data.summary?.totalUsers ??
+          data.summary?.totalSuppliers ??
+          0
+        }`,
         60,
-        summaryTop + 15
+        summaryTop + 20
       )
       .text(
         `Total Orders: ${data.summary?.totalOrders ?? 0}`,
         60,
-        summaryTop + 35
+        summaryTop + 45
       )
       .text(
         `Total Amount: ${data.summary?.totalAmount ?? 0} SAR`,
         60,
-        summaryTop + 55
+        summaryTop + 70
       );
 
-    doc.moveDown(7);
+    doc.moveDown(6);
 
     // ===============================
     // 📋 Details
@@ -1078,6 +1088,7 @@ exports.exportPDF = async (req, res) => {
     if (!list.length) {
       doc
         .fontSize(12)
+        .fillColor('#000')
         .text(rtl('لا توجد بيانات لعرضها'), { align: 'center' });
     }
 
@@ -1089,23 +1100,29 @@ exports.exportPDF = async (req, res) => {
         item.userName ||
         '—';
 
-      const boxTop = doc.y;
-      box(doc, 40, boxTop, doc.page.width - 80, 80);
+      const y = doc.y;
 
+      softBox(doc, 40, y, doc.page.width - 80, 90);
+
+      // الاسم
       doc
-        .fontSize(11)
+        .font('Arabic')
+        .fontSize(12)
         .fillColor('#0A2A43')
-        .text(rtl(`${index + 1} - ${name}`), doc.page.width - 60, boxTop + 12, {
-          align: 'right',
-        });
+        .text(
+          rtl(`${index + 1}. ${name}`),
+          doc.page.width - 60,
+          y + 15,
+          { align: 'right' }
+        );
 
-      doc.fillColor('#000').fontSize(10);
+      doc.fontSize(10).fillColor('#000');
 
       if (item.totalOrders !== undefined) {
         doc.text(
           rtl(`عدد الطلبات: ${item.totalOrders}`),
           doc.page.width - 60,
-          boxTop + 32,
+          y + 40,
           { align: 'right' }
         );
       }
@@ -1114,23 +1131,36 @@ exports.exportPDF = async (req, res) => {
         doc.text(
           rtl(`إجمالي المبلغ: ${item.totalAmount} ريال`),
           doc.page.width - 60,
-          boxTop + 50,
+          y + 60,
           { align: 'right' }
         );
       }
 
-      doc.moveDown(5);
+      doc.moveDown(6);
     });
 
     // ===============================
-    // ✍️ Footer
+    // ✍️ Footer + Pagination
     // ===============================
-    doc.moveDown(2);
-    doc
-      .fontSize(10)
-      .fillColor('#000')
-      .text('------------------------------', { align: 'center' })
-      .text(rtl('التوقيع'), { align: 'center' });
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+
+      doc
+        .fontSize(9)
+        .fillColor('#555')
+        .text(
+          `Page ${i + 1} of ${range.count}`,
+          40,
+          doc.page.height - 40
+        )
+        .text(
+          rtl(`تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}`),
+          doc.page.width - 200,
+          doc.page.height - 40,
+          { align: 'right' }
+        );
+    }
 
     doc.end();
 
