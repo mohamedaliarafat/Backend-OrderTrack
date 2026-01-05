@@ -580,9 +580,10 @@ exports.createOrder = async (req, res) => {
 
 exports.getOrders = async (req, res) => {
   try {
+     const hasPagination = req.query.page || req.query.limit;
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const limit = parseInt(req.query.limit) || 0; // 0 = بدون limit
+    const skip = limit ? (page - 1) * limit : 0;
 
     // بناء عوامل التصفية
     const filter = {};
