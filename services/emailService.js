@@ -40,11 +40,16 @@ const normalizeEmails = (to) => {
 // ===============================
 // 📤 Send Email (Production Safe)
 // ===============================
-exports.sendEmail = async ({ to, subject, html, replyTo }) => {
-  const recipients = normalizeEmails(to);
+// ===============================
+// 📤 Send Email (Supports TO + BCC)
+// ===============================
+exports.sendEmail = async ({ to, bcc, subject, html, replyTo }) => {
+  const toRecipients = normalizeEmails(to);
+  const bccRecipients = normalizeEmails(bcc);
 
-  if (recipients.length === 0) {
-    console.log('⚠️ sendEmail skipped – no valid recipients');
+  // ❌ لا يوجد أي مستلمين
+  if (toRecipients.length === 0 && bccRecipients.length === 0) {
+    console.log('⚠️ sendEmail skipped – no valid recipients (to & bcc empty)');
     return;
   }
 
@@ -58,16 +63,28 @@ exports.sendEmail = async ({ to, subject, html, replyTo }) => {
   try {
     const info = await transporter.sendMail({
       from: DEFAULT_FROM,
-      to: recipients.join(','),
+
+      // ✅ لازم يكون فيه to حتى لو وهمي
+      to: toRecipients.length > 0
+        ? toRecipients.join(',')
+        : 'no-reply@albuhairaalarabia.com',
+
+      // ✅ إرسال جماعي مخفي
+      bcc: bccRecipients.length > 0 ? bccRecipients.join(',') : undefined,
+
       subject,
       html,
       replyTo: replyTo || DEFAULT_REPLY_TO,
     });
 
-    console.log('📧 Email sent:', info.messageId);
+    console.log(
+      `📧 Email sent | to:${toRecipients.length} | bcc:${bccRecipients.length} | id:${info.messageId}`
+    );
+
     return info;
   } catch (error) {
     console.error('❌ Email error:', error.message);
     throw error;
   }
 };
+
