@@ -1946,8 +1946,499 @@ exports.updateOrderStatus = async (req, res) => {
     });
   }
 };
+// // ============================================
+// // 🔗 دمج الطلبات - محدثة حسب المتطلبات
+// // ============================================
+
+// exports.mergeOrders = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+  
+//   try {
+//     const { supplierOrderId, customerOrderId } = req.body;
+
+//     // =========================
+//     // 1️⃣ التحقق من المدخلات
+//     // =========================
+//     if (!supplierOrderId || !customerOrderId) {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'معرف طلب المورد ومعرف طلب العميل مطلوبان',
+//       });
+//     }
+
+//     if (supplierOrderId === customerOrderId) {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'لا يمكن دمج الطلب مع نفسه',
+//       });
+//     }
+
+//     // =========================
+//     // 2️⃣ جلب الطلبات مع session
+//     // =========================
+//     const supplierOrder = await Order.findById(supplierOrderId).session(session);
+//     const customerOrder = await Order.findById(customerOrderId).session(session);
+
+//     if (!supplierOrder || !customerOrder) {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(404).json({
+//         success: false,
+//         message: 'أحد الطلبات غير موجود',
+//       });
+//     }
+
+//     // =========================
+//     // 3️⃣ التحقق من أنواع الطلبات
+//     // =========================
+//     if (supplierOrder.orderSource !== 'مورد') {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'الطلب الأول يجب أن يكون طلب مورد',
+//       });
+//     }
+
+//     if (customerOrder.orderSource !== 'عميل') {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'الطلب الثاني يجب أن يكون طلب عميل',
+//       });
+//     }
+
+//     // =========================
+//     // 4️⃣ التحقق من حالة الدمج
+//     // =========================
+//     if (supplierOrder.mergeStatus !== 'منفصل' || customerOrder.mergeStatus !== 'منفصل') {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'أحد الطلبات تم دمجه مسبقًا',
+//       });
+//     }
+
+//     // =========================
+//     // 5️⃣ التحقق من التوافق
+//     // =========================
+//     if (supplierOrder.fuelType !== customerOrder.fuelType) {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'نوع الوقود غير متطابق',
+//       });
+//     }
+
+//     const supplierQty = Number(supplierOrder.quantity || 0);
+//     const customerQty = Number(customerOrder.quantity || 0);
+
+//     if (supplierQty < customerQty) {
+//       await session.abortTransaction();
+//       session.endSession();
+      
+//       return res.status(400).json({
+//         success: false,
+//         message: 'كمية المورد أقل من كمية طلب العميل',
+//       });
+//     }
+
+//     // =========================
+//     // 6️⃣ إنشاء رقم الطلب المدموج
+//     // =========================
+//     const today = new Date();
+//     const y = today.getFullYear();
+//     const m = String(today.getMonth() + 1).padStart(2, '0');
+//     const d = String(today.getDate()).padStart(2, '0');
+//     const rand = Math.floor(1000 + Math.random() * 9000);
+//     const mergedOrderNumber = `MIX-${y}${m}${d}-${rand}`;
+
+//     // =========================
+//     // 7️⃣ تحديد الموقع
+//     // =========================
+//     let city, area, address;
+
+//     if (customerOrder.city && customerOrder.area) {
+//       city = customerOrder.city;
+//       area = customerOrder.area;
+//       address = customerOrder.address || `${city} - ${area}`;
+//     } else if (supplierOrder.city && supplierOrder.area) {
+//       city = supplierOrder.city;
+//       area = supplierOrder.area;
+//       address = supplierOrder.address || `${city} - ${area}`;
+//     } else {
+//       city = 'غير محدد';
+//       area = 'غير محدد';
+//       address = 'غير محدد';
+//     }
+
+//     // =========================
+//     // 8️⃣ إنشاء الطلب المدموج
+//     // =========================
+//     const mergedOrderData = {
+//       orderSource: 'مدمج',
+//       mergeStatus: 'مدمج',
+//       orderNumber: mergedOrderNumber,
+      
+//       // معلومات الدمج
+//       mergedWithOrderId: null,
+//       mergedWithInfo: {
+//         supplierOrderNumber: supplierOrder.orderNumber,
+//         customerOrderNumber: customerOrder.orderNumber,
+//         supplierName: supplierOrder.supplierName,
+//         customerName: customerOrder.customerName,
+//         mergedAt: new Date()
+//       },
+      
+//       // معلومات المورد
+//       supplierOrderNumber: supplierOrder.supplierOrderNumber,
+//       supplier: supplierOrder.supplier,
+//       supplierName: supplierOrder.supplierName,
+//       supplierPhone: supplierOrder.supplierPhone,
+//       supplierCompany: supplierOrder.supplierCompany,
+//       supplierContactPerson: supplierOrder.supplierContactPerson,
+//       supplierAddress: supplierOrder.supplierAddress,
+      
+//       // معلومات العميل
+//       customer: customerOrder.customer,
+//       customerName: customerOrder.customerName,
+//       customerCode: customerOrder.customerCode,
+//       customerPhone: customerOrder.customerPhone,
+//       customerEmail: customerOrder.customerEmail,
+      
+//       // معلومات المنتج
+//       productType: supplierOrder.productType,
+//       fuelType: supplierOrder.fuelType,
+//       quantity: customerQty,
+//       unit: supplierOrder.unit || 'لتر',
+      
+//       // معلومات الموقع
+//       city,
+//       area,
+//       address,
+      
+//       // معلومات التوقيت
+//       orderDate: new Date(),
+//       loadingDate: supplierOrder.loadingDate || new Date(),
+//       loadingTime: supplierOrder.loadingTime || '08:00',
+//       arrivalDate: customerOrder.arrivalDate || new Date(),
+//       arrivalTime: customerOrder.arrivalTime || '10:00',
+      
+//       // معلومات الشحن
+//       driver: supplierOrder.driver,
+//       driverName: supplierOrder.driverName,
+//       driverPhone: supplierOrder.driverPhone,
+//       vehicleNumber: supplierOrder.vehicleNumber,
+      
+//       // معلومات السعر
+//       unitPrice: supplierOrder.unitPrice,
+//       totalPrice: supplierOrder.unitPrice ? supplierOrder.unitPrice * customerQty : 0,
+//       paymentMethod: supplierOrder.paymentMethod,
+//       paymentStatus: supplierOrder.paymentStatus,
+      
+//       // حالة الطلب المدمج
+//       status: 'تم الدمج',
+      
+//       // ملاحظات
+//       notes: `طلب مدمج من:\n• طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})\n• طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})\n${supplierOrder.notes ? 'ملاحظات المورد: ' + supplierOrder.notes + '\n' : ''}${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : ''}`.trim(),
+      
+//       supplierNotes: supplierOrder.supplierNotes,
+//       customerNotes: customerOrder.customerNotes,
+      
+//       // معلومات الإنشاء
+//       createdBy: req.user._id,
+//       createdByName: req.user.name || 'النظام',
+      
+//       createdAt: new Date(),
+//       updatedAt: new Date(),
+//     };
+
+//     const mergedOrder = new Order(mergedOrderData);
+//     await mergedOrder.save({ session });
+
+//     // =========================
+//     // 9️⃣ تحديث الطلبات الأصلية
+//     // =========================
+    
+//     // تحديث طلب المورد
+//     supplierOrder.mergeStatus = 'مدمج';
+//     supplierOrder.status = 'تم دمجه مع العميل';
+//     supplierOrder.mergedWithOrderId = mergedOrder._id;
+//     supplierOrder.mergedWithInfo = {
+//       orderNumber: customerOrder.orderNumber,
+//       partyName: customerOrder.customerName,
+//       partyType: 'عميل',
+//       mergedAt: new Date()
+//     };
+//     supplierOrder.mergedAt = new Date();
+//     supplierOrder.updatedAt = new Date();
+//     supplierOrder.notes = (supplierOrder.notes || '') + 
+//       `\n[${new Date().toLocaleString('ar-SA')}] تم دمجه مع طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})`;
+    
+//     await supplierOrder.save({ session });
+
+//     // تحديث طلب العميل
+//     customerOrder.mergeStatus = 'مدمج';
+//     customerOrder.status = 'تم دمجه مع المورد';
+//     customerOrder.mergedWithOrderId = mergedOrder._id;
+//     customerOrder.mergedWithInfo = {
+//       orderNumber: supplierOrder.orderNumber,
+//       partyName: supplierOrder.supplierName,
+//       partyType: 'مورد',
+//       mergedAt: new Date()
+//     };
+//     customerOrder.supplierOrderNumber = supplierOrder.supplierOrderNumber;
+//     customerOrder.mergedAt = new Date();
+//     customerOrder.updatedAt = new Date();
+//     customerOrder.notes = (customerOrder.notes || '') + 
+//       `\n[${new Date().toLocaleString('ar-SA')}] تم دمجه مع طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})`;
+    
+//     await customerOrder.save({ session });
+
+//     // =========================
+//     // 🔟 تسجيل النشاطات
+//     // =========================
+//     try {
+//       // نشاط للطلب المدموج
+//       const mergedActivity = new Activity({
+//         orderId: mergedOrder._id,
+//         activityType: 'دمج',
+//         description: `تم دمج طلب المورد ${supplierOrder.orderNumber} مع طلب العميل ${customerOrder.orderNumber}`,
+//         details: {
+//           supplierOrder: supplierOrder.orderNumber,
+//           customerOrder: customerOrder.orderNumber,
+//           mergedBy: req.user.name || 'النظام',
+//           quantity: customerQty,
+//           fuelType: supplierOrder.fuelType
+//         },
+//         performedBy: req.user._id,
+//         performedByName: req.user.name || 'النظام',
+//       });
+//       await mergedActivity.save({ session });
+
+//       // نشاط لطلب المورد
+//       const supplierActivity = new Activity({
+//         orderId: supplierOrder._id,
+//         activityType: 'دمج',
+//         description: `تم دمج الطلب مع طلب العميل ${customerOrder.orderNumber} (${customerOrder.customerName})`,
+//         details: {
+//           mergedOrder: mergedOrder.orderNumber,
+//           customerOrder: customerOrder.orderNumber,
+//           customerName: customerOrder.customerName,
+//           mergedBy: req.user.name || 'النظام'
+//         },
+//         performedBy: req.user._id,
+//         performedByName: req.user.name || 'النظام',
+//       });
+//       await supplierActivity.save({ session });
+
+//       // نشاط لطلب العميل
+//       const customerActivity = new Activity({
+//         orderId: customerOrder._id,
+//         activityType: 'دمج',
+//         description: `تم دمج الطلب مع طلب المورد ${supplierOrder.orderNumber} (${supplierOrder.supplierName})`,
+//         details: {
+//           mergedOrder: mergedOrder.orderNumber,
+//           supplierOrder: supplierOrder.orderNumber,
+//           supplierName: supplierOrder.supplierName,
+//           mergedBy: req.user.name || 'النظام'
+//         },
+//         performedBy: req.user._id,
+//         performedByName: req.user.name || 'النظام',
+//       });
+//       await customerActivity.save({ session });
+
+//     } catch (err) {
+//       console.warn('⚠️ بعض النشاطات لم يتم حفظها:', err.message);
+//     }
+
+//     // =========================
+//     // 📧 إرسال الإيميلات
+//     // =========================
+//     try {
+//       const sendEmailPromises = [];
+      
+//       // إيميل للمورد
+//       if (supplierOrder.supplierEmail || supplierOrder.supplier?.email) {
+//         const supplierEmail = supplierOrder.supplierEmail || supplierOrder.supplier?.email;
+//         const emailTemplate = `
+//           <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+//             <h2 style="color: #4CAF50;">✅ تم دمج طلبك مع عميل</h2>
+//             <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+//               <h3>تفاصيل الدمج</h3>
+//               <p><strong>رقم طلبك:</strong> ${supplierOrder.orderNumber}</p>
+//               <p><strong>اسم العميل:</strong> ${customerOrder.customerName}</p>
+//               <p><strong>رقم طلب العميل:</strong> ${customerOrder.orderNumber}</p>
+//               <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+//               <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
+//               <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+//             </div>
+//             <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع العميل</strong></p>
+//           </div>
+//         `;
+        
+//         sendEmailPromises.push(
+//           sendEmail({
+//             to: supplierEmail,
+//             subject: `✅ تم دمج طلبك ${supplierOrder.orderNumber} مع عميل`,
+//             html: emailTemplate,
+//           })
+//         );
+//       }
+      
+//       // إيميل للعميل
+//       if (customerOrder.customerEmail) {
+//         const emailTemplate = `
+//           <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+//             <h2 style="color: #4CAF50;">✅ تم تخصيص مورد لطلبك</h2>
+//             <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+//               <h3>تفاصيل التخصيص</h3>
+//               <p><strong>رقم طلبك:</strong> ${customerOrder.orderNumber}</p>
+//               <p><strong>اسم المورد:</strong> ${supplierOrder.supplierName}</p>
+//               <p><strong>رقم طلب المورد:</strong> ${supplierOrder.orderNumber}</p>
+//               <p><strong>رقم طلب المورد (الخاص بالمورد):</strong> ${supplierOrder.supplierOrderNumber}</p>
+//               <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+//               <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
+//               <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+//             </div>
+//             <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع المورد</strong></p>
+//           </div>
+//         `;
+        
+//         sendEmailPromises.push(
+//           sendEmail({
+//             to: customerOrder.customerEmail,
+//             subject: `✅ تم تخصيص مورد لطلبك ${customerOrder.orderNumber}`,
+//             html: emailTemplate,
+//           })
+//         );
+//       }
+      
+//       // إيميل للمسؤولين
+//       const adminUsers = await mongoose.model('User').find({
+//         role: { $in: ['admin', 'manager'] },
+//         isActive: true,
+//         email: { $exists: true, $ne: '' }
+//       }).session(session);
+      
+//       if (adminUsers.length > 0) {
+//         const adminEmails = adminUsers.map(user => user.email);
+//         const adminEmailTemplate = `
+//           <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+//             <h2 style="color: #2196F3;">📋 تقرير دمج طلبات</h2>
+//             <div style="background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0;">
+//               <h3>تفاصيل الدمج</h3>
+//               <p><strong>تم بواسطة:</strong> ${req.user.name || 'النظام'}</p>
+//               <p><strong>وقت الدمج:</strong> ${new Date().toLocaleString('ar-SA')}</p>
+//               <hr>
+//               <p><strong>طلب المورد:</strong> ${supplierOrder.orderNumber} (${supplierOrder.supplierName})</p>
+//               <p><strong>طلب العميل:</strong> ${customerOrder.orderNumber} (${customerOrder.customerName})</p>
+//               <p><strong>الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
+//               <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+//               <p><strong>القيمة:</strong> ${mergedOrder.totalPrice ? mergedOrder.totalPrice.toLocaleString('ar-SA') : 0} ريال</p>
+//             </div>
+//           </div>
+//         `;
+        
+//         sendEmailPromises.push(
+//           sendEmail({
+//             to: adminEmails,
+//             subject: `📋 تم دمج طلبين: ${supplierOrder.orderNumber} مع ${customerOrder.orderNumber}`,
+//             html: adminEmailTemplate,
+//           })
+//         );
+//       }
+      
+//       // إرسال جميع الإيميلات
+//       await Promise.all(sendEmailPromises);
+      
+//     } catch (emailError) {
+//       console.error('❌ Failed to send merge emails:', emailError.message);
+//       // لا نوقف العملية إذا فشل الإيميل
+//     }
+
+//     // =========================
+//     // ✅ تأكيد العملية
+//     // =========================
+//     await session.commitTransaction();
+//     session.endSession();
+
+//     // =========================
+//     // 📊 الاستجابة
+//     // =========================
+//     return res.status(200).json({
+//       success: true,
+//       message: 'تم دمج الطلبات بنجاح',
+//       data: {
+//         mergedOrder: {
+//           _id: mergedOrder._id,
+//           orderNumber: mergedOrder.orderNumber,
+//           status: mergedOrder.status,
+//           mergeStatus: mergedOrder.mergeStatus,
+//           supplierName: mergedOrder.supplierName,
+//           customerName: mergedOrder.customerName,
+//           quantity: mergedOrder.quantity,
+//           unit: mergedOrder.unit,
+//           fuelType: mergedOrder.fuelType,
+//           totalPrice: mergedOrder.totalPrice,
+//           createdAt: mergedOrder.createdAt
+//         },
+//         supplierOrder: {
+//           _id: supplierOrder._id,
+//           orderNumber: supplierOrder.orderNumber,
+//           status: supplierOrder.status,
+//           mergeStatus: supplierOrder.mergeStatus,
+//           mergedWith: supplierOrder.mergedWithInfo,
+//           updatedAt: supplierOrder.updatedAt
+//         },
+//         customerOrder: {
+//           _id: customerOrder._id,
+//           orderNumber: customerOrder.orderNumber,
+//           status: customerOrder.status,
+//           mergeStatus: customerOrder.mergeStatus,
+//           mergedWith: customerOrder.mergedWithInfo,
+//           supplierOrderNumber: customerOrder.supplierOrderNumber,
+//           updatedAt: customerOrder.updatedAt
+//         }
+//       }
+//     });
+
+//   } catch (error) {
+//     // =========================
+//     // ❌ معالجة الأخطاء
+//     // =========================
+//     await session.abortTransaction();
+//     session.endSession();
+    
+//     console.error('❌ Error merging orders:', error);
+    
+//     return res.status(500).json({
+//       success: false,
+//       message: 'حدث خطأ أثناء دمج الطلبات',
+//       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+//     });
+//   }
+// };
+
+
+
 // ============================================
-// 🔗 دمج الطلبات - محدثة حسب المتطلبات
+// 🔗 دمج الطلبات - محدثة مع بريد إلكتروني شامل
 // ============================================
 
 exports.mergeOrders = async (req, res) => {
@@ -1955,7 +2446,7 @@ exports.mergeOrders = async (req, res) => {
   session.startTransaction();
   
   try {
-    const { supplierOrderId, customerOrderId } = req.body;
+    const { supplierOrderId, customerOrderId, mergeNotes } = req.body;
 
     // =========================
     // 1️⃣ التحقق من المدخلات
@@ -1981,10 +2472,17 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 2️⃣ جلب الطلبات مع session
+    // 2️⃣ جلب الطلبات مع جميع البيانات
     // =========================
-    const supplierOrder = await Order.findById(supplierOrderId).session(session);
-    const customerOrder = await Order.findById(customerOrderId).session(session);
+    const supplierOrder = await Order.findById(supplierOrderId)
+      .populate('supplier', 'name company contactPerson phone email address')
+      .populate('createdBy', 'name email')
+      .session(session);
+    
+    const customerOrder = await Order.findById(customerOrderId)
+      .populate('customer', 'name code phone email city area address')
+      .populate('createdBy', 'name email')
+      .session(session);
 
     if (!supplierOrder || !customerOrder) {
       await session.abortTransaction();
@@ -2102,24 +2600,27 @@ exports.mergeOrders = async (req, res) => {
         customerOrderNumber: customerOrder.orderNumber,
         supplierName: supplierOrder.supplierName,
         customerName: customerOrder.customerName,
-        mergedAt: new Date()
+        mergedAt: new Date(),
+        mergedBy: req.user.name || req.user.email
       },
       
       // معلومات المورد
       supplierOrderNumber: supplierOrder.supplierOrderNumber,
-      supplier: supplierOrder.supplier,
+      supplier: supplierOrder.supplier?._id || supplierOrder.supplier,
       supplierName: supplierOrder.supplierName,
       supplierPhone: supplierOrder.supplierPhone,
       supplierCompany: supplierOrder.supplierCompany,
       supplierContactPerson: supplierOrder.supplierContactPerson,
       supplierAddress: supplierOrder.supplierAddress,
+      supplierEmail: supplierOrder.supplier?.email || supplierOrder.supplierEmail,
       
       // معلومات العميل
-      customer: customerOrder.customer,
+      customer: customerOrder.customer?._id || customerOrder.customer,
       customerName: customerOrder.customerName,
       customerCode: customerOrder.customerCode,
       customerPhone: customerOrder.customerPhone,
-      customerEmail: customerOrder.customerEmail,
+      customerEmail: customerOrder.customer?.email || customerOrder.customerEmail,
+      customerAddress: customerOrder.customer?.address || customerOrder.address,
       
       // معلومات المنتج
       productType: supplierOrder.productType,
@@ -2150,19 +2651,26 @@ exports.mergeOrders = async (req, res) => {
       totalPrice: supplierOrder.unitPrice ? supplierOrder.unitPrice * customerQty : 0,
       paymentMethod: supplierOrder.paymentMethod,
       paymentStatus: supplierOrder.paymentStatus,
+      driverEarnings: supplierOrder.driverEarnings || 0,
       
       // حالة الطلب المدمج
       status: 'تم الدمج',
       
       // ملاحظات
-      notes: `طلب مدمج من:\n• طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})\n• طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})\n${supplierOrder.notes ? 'ملاحظات المورد: ' + supplierOrder.notes + '\n' : ''}${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : ''}`.trim(),
+      notes: `طلب مدمج من:
+• طلب المورد: ${supplierOrder.orderNumber} (${supplierOrder.supplierName})
+• طلب العميل: ${customerOrder.orderNumber} (${customerOrder.customerName})
+${mergeNotes ? 'ملاحظات الدمج: ' + mergeNotes + '\n' : ''}
+${supplierOrder.notes ? 'ملاحظات المورد: ' + supplierOrder.notes + '\n' : ''}
+${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : ''}`.trim(),
       
       supplierNotes: supplierOrder.supplierNotes,
       customerNotes: customerOrder.customerNotes,
+      mergeNotes: mergeNotes,
       
       // معلومات الإنشاء
       createdBy: req.user._id,
-      createdByName: req.user.name || 'النظام',
+      createdByName: req.user.name || req.user.email,
       
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -2183,7 +2691,9 @@ exports.mergeOrders = async (req, res) => {
       orderNumber: customerOrder.orderNumber,
       partyName: customerOrder.customerName,
       partyType: 'عميل',
-      mergedAt: new Date()
+      mergedAt: new Date(),
+      mergedBy: req.user.name || req.user.email,
+      mergedOrderNumber: mergedOrder.orderNumber
     };
     supplierOrder.mergedAt = new Date();
     supplierOrder.updatedAt = new Date();
@@ -2200,7 +2710,9 @@ exports.mergeOrders = async (req, res) => {
       orderNumber: supplierOrder.orderNumber,
       partyName: supplierOrder.supplierName,
       partyType: 'مورد',
-      mergedAt: new Date()
+      mergedAt: new Date(),
+      mergedBy: req.user.name || req.user.email,
+      mergedOrderNumber: mergedOrder.orderNumber
     };
     customerOrder.supplierOrderNumber = supplierOrder.supplierOrderNumber;
     customerOrder.mergedAt = new Date();
@@ -2222,12 +2734,14 @@ exports.mergeOrders = async (req, res) => {
         details: {
           supplierOrder: supplierOrder.orderNumber,
           customerOrder: customerOrder.orderNumber,
-          mergedBy: req.user.name || 'النظام',
+          mergedOrder: mergedOrder.orderNumber,
+          mergedBy: req.user.name || req.user.email,
           quantity: customerQty,
-          fuelType: supplierOrder.fuelType
+          fuelType: supplierOrder.fuelType,
+          totalPrice: mergedOrder.totalPrice
         },
         performedBy: req.user._id,
-        performedByName: req.user.name || 'النظام',
+        performedByName: req.user.name || req.user.email,
       });
       await mergedActivity.save({ session });
 
@@ -2240,10 +2754,12 @@ exports.mergeOrders = async (req, res) => {
           mergedOrder: mergedOrder.orderNumber,
           customerOrder: customerOrder.orderNumber,
           customerName: customerOrder.customerName,
-          mergedBy: req.user.name || 'النظام'
+          mergedBy: req.user.name || req.user.email,
+          quantityUsed: customerQty,
+          remainingQuantity: supplierQty - customerQty
         },
         performedBy: req.user._id,
-        performedByName: req.user.name || 'النظام',
+        performedByName: req.user.name || req.user.email,
       });
       await supplierActivity.save({ session });
 
@@ -2256,10 +2772,13 @@ exports.mergeOrders = async (req, res) => {
           mergedOrder: mergedOrder.orderNumber,
           supplierOrder: supplierOrder.orderNumber,
           supplierName: supplierOrder.supplierName,
-          mergedBy: req.user.name || 'النظام'
+          mergedBy: req.user.name || req.user.email,
+          quantity: customerQty,
+          unitPrice: supplierOrder.unitPrice,
+          totalPrice: mergedOrder.totalPrice
         },
         performedBy: req.user._id,
-        performedByName: req.user.name || 'النظام',
+        performedByName: req.user.name || req.user.email,
       });
       await customerActivity.save({ session });
 
@@ -2268,104 +2787,577 @@ exports.mergeOrders = async (req, res) => {
     }
 
     // =========================
-    // 📧 إرسال الإيميلات
+    // 📧 إنشاء قالب بريد إلكتروني شامل للدمج
+    // =========================
+    const createMergeEmailTemplate = (recipientType, orderData) => {
+      const formatDate = (date) => {
+        if (!date) return 'غير محدد';
+        return new Date(date).toLocaleDateString('ar-SA', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+      };
+
+      const formatTime = (time) => time || 'غير محدد';
+      
+      const formatCurrency = (amount) => {
+        if (!amount) return '0.00 ريال';
+        return amount.toLocaleString('ar-SA', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }) + ' ريال';
+      };
+
+      const baseTemplate = `
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>✅ تأكيد دمج الطلبات</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                }
+                
+                body {
+                    background-color: #f5f7fa;
+                    line-height: 1.6;
+                    color: #333;
+                }
+                
+                .email-container {
+                    max-width: 700px;
+                    margin: 30px auto;
+                    background-color: #ffffff;
+                    border-radius: 15px;
+                    overflow: hidden;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+                }
+                
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 40px 30px;
+                    text-align: center;
+                    border-bottom: 5px solid #4a5568;
+                }
+                
+                .header h1 {
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                    font-weight: 700;
+                }
+                
+                .header .subtitle {
+                    font-size: 16px;
+                    opacity: 0.9;
+                    margin-top: 5px;
+                }
+                
+                .order-number {
+                    background: #4CAF50;
+                    color: white;
+                    padding: 8px 20px;
+                    border-radius: 25px;
+                    display: inline-block;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    font-size: 18px;
+                    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+                }
+                
+                .content {
+                    padding: 40px;
+                }
+                
+                .section {
+                    margin-bottom: 35px;
+                    padding: 25px;
+                    border-radius: 10px;
+                    background-color: #f8f9fa;
+                    border-left: 5px solid #667eea;
+                }
+                
+                .section-title {
+                    color: #2d3748;
+                    font-size: 20px;
+                    margin-bottom: 20px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #e2e8f0;
+                    font-weight: 600;
+                }
+                
+                .info-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-top: 15px;
+                }
+                
+                .info-item {
+                    background: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                }
+                
+                .info-label {
+                    color: #718096;
+                    font-size: 14px;
+                    margin-bottom: 5px;
+                    font-weight: 500;
+                }
+                
+                .info-value {
+                    color: #2d3748;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                
+                .highlight {
+                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                    color: white;
+                    padding: 25px;
+                    border-radius: 10px;
+                    text-align: center;
+                    margin: 30px 0;
+                }
+                
+                .highlight h3 {
+                    font-size: 22px;
+                    margin-bottom: 10px;
+                }
+                
+                .footer {
+                    background: #2d3748;
+                    color: white;
+                    padding: 25px;
+                    text-align: center;
+                    margin-top: 40px;
+                    border-top: 5px solid #4a5568;
+                }
+                
+                .footer p {
+                    margin: 10px 0;
+                    opacity: 0.8;
+                }
+                
+                .logo {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #667eea;
+                    margin-bottom: 10px;
+                }
+                
+                .alert {
+                    background: #fff3cd;
+                    border: 1px solid #ffeaa7;
+                    color: #856404;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                }
+                
+                .badge {
+                    display: inline-block;
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    margin-left: 10px;
+                }
+                
+                .badge-success {
+                    background: #d4edda;
+                    color: #155724;
+                }
+                
+                .badge-info {
+                    background: #d1ecf1;
+                    color: #0c5460;
+                }
+                
+                .badge-warning {
+                    background: #fff3cd;
+                    color: #856404;
+                }
+                
+                .timeline {
+                    position: relative;
+                    padding: 20px 0;
+                }
+                
+                .timeline-item {
+                    position: relative;
+                    padding-left: 30px;
+                    margin-bottom: 20px;
+                }
+                
+                .timeline-item:before {
+                    content: '';
+                    position: absolute;
+                    left: 0;
+                    top: 5px;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 50%;
+                    background: #667eea;
+                }
+                
+                .timeline-item:after {
+                    content: '';
+                    position: absolute;
+                    left: 5px;
+                    top: 5px;
+                    width: 2px;
+                    height: 100%;
+                    background: #e2e8f0;
+                }
+                
+                .timeline-item:last-child:after {
+                    display: none;
+                }
+                
+                @media (max-width: 600px) {
+                    .content {
+                        padding: 20px;
+                    }
+                    
+                    .header {
+                        padding: 30px 20px;
+                    }
+                    
+                    .header h1 {
+                        font-size: 22px;
+                    }
+                    
+                    .info-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="header">
+                    <h1>✅ تأكيد دمج الطلبات</h1>
+                    <p class="subtitle">تم دمج طلبين بنجاح في منصة إدارة الطلبات</p>
+                    <div class="order-number">${mergedOrder.orderNumber}</div>
+                </div>
+                
+                <div class="content">
+                    <div class="section">
+                        <h2 class="section-title">📊 ملخص الدمج</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">تاريخ الدمج</div>
+                                <div class="info-value">${formatDate(new Date())}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">تم الدمج بواسطة</div>
+                                <div class="info-value">${req.user.name || req.user.email}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">حالة الدمج</div>
+                                <div class="info-value">تم بنجاح <span class="badge badge-success">نشط</span></div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">رقم الطلب المدموج</div>
+                                <div class="info-value">${mergedOrder.orderNumber}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2 class="section-title">🛒 تفاصيل المنتج</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">نوع المنتج</div>
+                                <div class="info-value">${supplierOrder.productType || 'غير محدد'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">نوع الوقود</div>
+                                <div class="info-value">${supplierOrder.fuelType || 'غير محدد'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">الكمية المدموجة</div>
+                                <div class="info-value">${customerQty} ${supplierOrder.unit || 'لتر'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">السعر للوحدة</div>
+                                <div class="info-value">${formatCurrency(supplierOrder.unitPrice)}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="highlight">
+                        <h3>💰 القيمة الإجمالية</h3>
+                        <p style="font-size: 28px; font-weight: bold; margin: 10px 0;">
+                            ${formatCurrency(mergedOrder.totalPrice)}
+                        </p>
+                        <p>قيمة الطلب المدموج</p>
+                    </div>
+                    
+                    <div class="section">
+                        <h2 class="section-title">🏢 معلومات الطرفين</h2>
+                        <div class="info-grid">
+                            <!-- معلومات المورد -->
+                            <div class="info-item">
+                                <div class="info-label">المورد</div>
+                                <div class="info-value">${supplierOrder.supplierName}</div>
+                                <div style="margin-top: 8px; font-size: 14px;">
+                                    ${supplierOrder.supplierCompany ? `<div>${supplierOrder.supplierCompany}</div>` : ''}
+                                    ${supplierOrder.supplierContactPerson ? `<div>الشخص المسؤول: ${supplierOrder.supplierContactPerson}</div>` : ''}
+                                    ${supplierOrder.supplierPhone ? `<div>📞 ${supplierOrder.supplierPhone}</div>` : ''}
+                                    ${supplierOrder.supplier?.email ? `<div>✉️ ${supplierOrder.supplier.email}</div>` : ''}
+                                </div>
+                            </div>
+                            
+                            <!-- معلومات العميل -->
+                            <div class="info-item">
+                                <div class="info-label">العميل</div>
+                                <div class="info-value">${customerOrder.customerName}</div>
+                                <div style="margin-top: 8px; font-size: 14px;">
+                                    ${customerOrder.customerCode ? `<div>الكود: ${customerOrder.customerCode}</div>` : ''}
+                                    ${customerOrder.customerPhone ? `<div>📞 ${customerOrder.customerPhone}</div>` : ''}
+                                    ${customerOrder.customer?.email ? `<div>✉️ ${customerOrder.customer.email}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2 class="section-title">📍 معلومات التوصيل</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">الموقع</div>
+                                <div class="info-value">${city} - ${area}</div>
+                                <div style="margin-top: 5px; font-size: 14px;">${address}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">السائق</div>
+                                <div class="info-value">${supplierOrder.driverName || 'لم يتم التحديد بعد'}</div>
+                                ${supplierOrder.driverPhone ? `<div style="margin-top: 5px; font-size: 14px;">📞 ${supplierOrder.driverPhone}</div>` : ''}
+                                ${supplierOrder.vehicleNumber ? `<div style="margin-top: 5px; font-size: 14px;">🚚 ${supplierOrder.vehicleNumber}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2 class="section-title">⏰ الجدول الزمني</h2>
+                        <div class="timeline">
+                            <div class="timeline-item">
+                                <strong>وقت التحميل:</strong><br>
+                                ${formatDate(supplierOrder.loadingDate)} - ${formatTime(supplierOrder.loadingTime)}
+                            </div>
+                            <div class="timeline-item">
+                                <strong>وقت الوصول المتوقع:</strong><br>
+                                ${formatDate(customerOrder.arrivalDate)} - ${formatTime(customerOrder.arrivalTime)}
+                            </div>
+                            <div class="timeline-item">
+                                <strong>تاريخ إنشاء الطلب المدموج:</strong><br>
+                                ${formatDate(new Date())}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${mergeNotes ? `
+                    <div class="section">
+                        <h2 class="section-title">📝 ملاحظات الدمج</h2>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border-right: 4px solid #4CAF50;">
+                            <p style="font-size: 15px; line-height: 1.6;">${mergeNotes}</p>
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    <div class="section">
+                        <h2 class="section-title">📄 الطلبات الأصلية</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">طلب المورد</div>
+                                <div class="info-value">${supplierOrder.orderNumber}</div>
+                                <div style="margin-top: 8px; font-size: 14px;">
+                                    <div>الحالة: ${supplierOrder.status}</div>
+                                    <div>الكمية الأصلية: ${supplierQty} ${supplierOrder.unit}</div>
+                                    ${supplierOrder.supplierOrderNumber ? `<div>رقم طلب المورد: ${supplierOrder.supplierOrderNumber}</div>` : ''}
+                                </div>
+                            </div>
+                            
+                            <div class="info-item">
+                                <div class="info-label">طلب العميل</div>
+                                <div class="info-value">${customerOrder.orderNumber}</div>
+                                <div style="margin-top: 8px; font-size: 14px;">
+                                    <div>الحالة: ${customerOrder.status}</div>
+                                    <div>الكمية المطلوبة: ${customerQty} ${customerOrder.unit || supplierOrder.unit}</div>
+                                    <div>نوع الطلب: ${customerOrder.requestType || 'غير محدد'}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert">
+                        <strong>💡 ملاحظة:</strong>
+                        <p style="margin-top: 10px;">
+                            يمكنك تتبع حالة الطلب المدموج عبر الرابط الخاص به في المنصة.<br>
+                            تم تحديث حالات الطلبات الأصلية لتعكس عملية الدمج.
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <div class="logo">نظام إدارة الطلبات</div>
+                    <p>تم إرسال هذه الرسالة تلقائيًا من النظام</p>
+                    <p>© ${new Date().getFullYear()} جميع الحقوق محفوظة</p>
+                    <p style="font-size: 12px; opacity: 0.6; margin-top: 15px;">
+                        إذا كان لديك أي استفسار، يرجى التواصل مع فريق الدعم
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+      `;
+      
+      return baseTemplate;
+    };
+
+    // =========================
+    // 📧 إرسال البريد الإلكتروني الشامل
     // =========================
     try {
       const sendEmailPromises = [];
       
-      // إيميل للمورد
-      if (supplierOrder.supplierEmail || supplierOrder.supplier?.email) {
-        const supplierEmail = supplierOrder.supplierEmail || supplierOrder.supplier?.email;
-        const emailTemplate = `
-          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #4CAF50;">✅ تم دمج طلبك مع عميل</h2>
-            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h3>تفاصيل الدمج</h3>
-              <p><strong>رقم طلبك:</strong> ${supplierOrder.orderNumber}</p>
-              <p><strong>اسم العميل:</strong> ${customerOrder.customerName}</p>
-              <p><strong>رقم طلب العميل:</strong> ${customerOrder.orderNumber}</p>
-              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
-              <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
-              <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
-            </div>
-            <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع العميل</strong></p>
-          </div>
-        `;
+      // 1️⃣ إيميل للمورد
+      if (supplierOrder.supplier?.email || supplierOrder.supplierEmail) {
+        const supplierEmail = supplierOrder.supplier?.email || supplierOrder.supplierEmail;
+        const emailTemplate = createMergeEmailTemplate('supplier', {
+          mergedOrder,
+          supplierOrder,
+          customerOrder,
+          reqUser: req.user
+        });
         
         sendEmailPromises.push(
           sendEmail({
             to: supplierEmail,
-            subject: `✅ تم دمج طلبك ${supplierOrder.orderNumber} مع عميل`,
+            subject: `✅ تم دمج طلبك ${supplierOrder.orderNumber} مع عميل - ${mergedOrder.orderNumber}`,
             html: emailTemplate,
+            attachments: req.files?.supplierDocuments || []
+          }).catch(emailError => {
+            console.error(`❌ Failed to send email to supplier ${supplierEmail}:`, emailError.message);
           })
         );
       }
       
-      // إيميل للعميل
-      if (customerOrder.customerEmail) {
-        const emailTemplate = `
-          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #4CAF50;">✅ تم تخصيص مورد لطلبك</h2>
-            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h3>تفاصيل التخصيص</h3>
-              <p><strong>رقم طلبك:</strong> ${customerOrder.orderNumber}</p>
-              <p><strong>اسم المورد:</strong> ${supplierOrder.supplierName}</p>
-              <p><strong>رقم طلب المورد:</strong> ${supplierOrder.orderNumber}</p>
-              <p><strong>رقم طلب المورد (الخاص بالمورد):</strong> ${supplierOrder.supplierOrderNumber}</p>
-              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
-              <p><strong>نوع الوقود:</strong> ${supplierOrder.fuelType}</p>
-              <p><strong>رقم الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
-            </div>
-            <p>تم تحديث حالة طلبك إلى: <strong style="color: #9c27b0;">تم دمجه مع المورد</strong></p>
-          </div>
-        `;
+      // 2️⃣ إيميل للعميل
+      if (customerOrder.customer?.email || customerOrder.customerEmail) {
+        const customerEmail = customerOrder.customer?.email || customerOrder.customerEmail;
+        const emailTemplate = createMergeEmailTemplate('customer', {
+          mergedOrder,
+          supplierOrder,
+          customerOrder,
+          reqUser: req.user
+        });
         
         sendEmailPromises.push(
           sendEmail({
-            to: customerOrder.customerEmail,
-            subject: `✅ تم تخصيص مورد لطلبك ${customerOrder.orderNumber}`,
+            to: customerEmail,
+            subject: `✅ تم تخصيص مورد لطلبك ${customerOrder.orderNumber} - ${mergedOrder.orderNumber}`,
             html: emailTemplate,
+            attachments: req.files?.customerDocuments || []
+          }).catch(emailError => {
+            console.error(`❌ Failed to send email to customer ${customerEmail}:`, emailError.message);
           })
         );
       }
       
-      // إيميل للمسؤولين
+      // 3️⃣ إيميل للمنشئين
+      const creators = new Set();
+      
+      if (supplierOrder.createdBy?.email) creators.add(supplierOrder.createdBy.email);
+      if (customerOrder.createdBy?.email) creators.add(customerOrder.createdBy.email);
+      if (req.user.email) creators.add(req.user.email);
+      
+      // 4️⃣ إيميل للمسؤولين والمديرين
       const adminUsers = await mongoose.model('User').find({
         role: { $in: ['admin', 'manager'] },
         isActive: true,
         email: { $exists: true, $ne: '' }
       }).session(session);
       
-      if (adminUsers.length > 0) {
-        const adminEmails = adminUsers.map(user => user.email);
-        const adminEmailTemplate = `
-          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #2196F3;">📋 تقرير دمج طلبات</h2>
-            <div style="background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h3>تفاصيل الدمج</h3>
-              <p><strong>تم بواسطة:</strong> ${req.user.name || 'النظام'}</p>
-              <p><strong>وقت الدمج:</strong> ${new Date().toLocaleString('ar-SA')}</p>
-              <hr>
-              <p><strong>طلب المورد:</strong> ${supplierOrder.orderNumber} (${supplierOrder.supplierName})</p>
-              <p><strong>طلب العميل:</strong> ${customerOrder.orderNumber} (${customerOrder.customerName})</p>
-              <p><strong>الطلب المدموج:</strong> ${mergedOrder.orderNumber}</p>
-              <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
-              <p><strong>القيمة:</strong> ${mergedOrder.totalPrice ? mergedOrder.totalPrice.toLocaleString('ar-SA') : 0} ريال</p>
-            </div>
-          </div>
-        `;
+      adminUsers.forEach(user => {
+        if (user.email) creators.add(user.email);
+      });
+      
+      if (creators.size > 0) {
+        const adminEmails = Array.from(creators);
+        const adminTemplate = createMergeEmailTemplate('admin', {
+          mergedOrder,
+          supplierOrder,
+          customerOrder,
+          reqUser: req.user,
+          adminUsers
+        });
         
         sendEmailPromises.push(
           sendEmail({
             to: adminEmails,
-            subject: `📋 تم دمج طلبين: ${supplierOrder.orderNumber} مع ${customerOrder.orderNumber}`,
-            html: adminEmailTemplate,
+            subject: `📋 تقرير دمج طلبات: ${supplierOrder.orderNumber} ↔ ${customerOrder.orderNumber}`,
+            html: adminTemplate,
+            bcc: 'reports@system.com' // يمكن إضافة بريد إلكتروني للتسجيلات
+          }).catch(emailError => {
+            console.error(`❌ Failed to send admin email:`, emailError.message);
           })
         );
       }
       
-      // إرسال جميع الإيميلات
-      await Promise.all(sendEmailPromises);
+      // 5️⃣ إيميل للسائق إذا كان موجودًا
+      if (supplierOrder.driver) {
+        const driver = await Driver.findById(supplierOrder.driver).session(session);
+        if (driver?.email) {
+          const driverTemplate = `
+            <div dir="rtl" style="font-family: Arial; padding:20px">
+              <h2>🚚 مهمة توصيل جديدة</h2>
+              <p>عزيزي ${driver.name},</p>
+              <p>تم تخصيص طلب توصيل جديد لك:</p>
+              <div style="background:#f5f5f5; padding:15px; margin:15px 0; border-radius:5px">
+                <p><strong>رقم الطلب:</strong> ${mergedOrder.orderNumber}</p>
+                <p><strong>من:</strong> ${supplierOrder.supplierName}</p>
+                <p><strong>إلى:</strong> ${customerOrder.customerName}</p>
+                <p><strong>الموقع:</strong> ${city} - ${area}</p>
+                <p><strong>وقت التحميل:</strong> ${formatDate(supplierOrder.loadingDate)} ${supplierOrder.loadingTime}</p>
+                <p><strong>الكمية:</strong> ${customerQty} ${supplierOrder.unit}</p>
+              </div>
+              <p>تفاصيل كاملة مرفقة في هذا الإيميل.</p>
+            </div>
+          `;
+          
+          sendEmailPromises.push(
+            sendEmail({
+              to: driver.email,
+              subject: `🚚 مهمة توصيل جديدة - ${mergedOrder.orderNumber}`,
+              html: driverTemplate
+            }).catch(emailError => {
+              console.error(`❌ Failed to send driver email:`, emailError.message);
+            })
+          );
+        }
+      }
+      
+      // انتظار إرسال جميع الإيميلات (مع وقت انتظار)
+      await Promise.allSettled(sendEmailPromises.map(promise => 
+        promise.catch(err => {
+          console.warn(`⚠️ Email sending partially failed:`, err.message);
+          return null;
+        })
+      ));
+      
+      console.log(`📧 تم إرسال ${sendEmailPromises.length} إيميلات بنجاح`);
       
     } catch (emailError) {
       console.error('❌ Failed to send merge emails:', emailError.message);
@@ -2383,7 +3375,7 @@ exports.mergeOrders = async (req, res) => {
     // =========================
     return res.status(200).json({
       success: true,
-      message: 'تم دمج الطلبات بنجاح',
+      message: 'تم دمج الطلبات بنجاح وإرسال الإيميلات',
       data: {
         mergedOrder: {
           _id: mergedOrder._id,
@@ -2414,6 +3406,12 @@ exports.mergeOrders = async (req, res) => {
           mergedWith: customerOrder.mergedWithInfo,
           supplierOrderNumber: customerOrder.supplierOrderNumber,
           updatedAt: customerOrder.updatedAt
+        },
+        emailsSent: {
+          toSupplier: !!supplierOrder.supplier?.email,
+          toCustomer: !!customerOrder.customer?.email,
+          toAdmins: true,
+          toDriver: !!supplierOrder.driver
         }
       }
     });
@@ -2430,11 +3428,22 @@ exports.mergeOrders = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء دمج الطلبات',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
 
+// دالة مساعدة لتنسيق التاريخ
+function formatDate(date) {
+  if (!date) return 'غير محدد';
+  return new Date(date).toLocaleDateString('ar-SA', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
 
 
 // ============================================
