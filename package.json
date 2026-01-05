@@ -20,6 +20,8 @@
     "moment": "^2.29.4",
     "mongoose": "^7.5.0",
     "multer": "^1.4.5-lts.1",
+     "arabic-persian-reshaper": "^1.0.3",
+  "bidi-js": "^1.0.3"
     "nodemailer": "^7.0.12",
     "pdfkit": "^0.14.0",
     "resend": "^6.6.0"
