@@ -162,24 +162,34 @@ function drawHeader(doc, { fromDate, toDate, reportTitle }) {
 // ===============================
 function addCustomersToPDF(doc, data) {
   sectionTitle(doc, 'تفاصيل العملاء');
-  
+
+  const boxX = 40;
+  const boxWidth = doc.page.width - 80;
+
   data.customers.forEach((customer, index) => {
+    // 🔥 حماية كسر الصفحة
+    if (doc.y > doc.page.height - 160) {
+      doc.addPage();
+    }
+
     const y = doc.y;
-    softBox(doc, 40, y, doc.page.width - 80, 110);
-    
-    doc
-      .font('Arabic')
-      .fontSize(12)
-      .fillColor('#0A2A43')
-      .text(
-        rtl(`${index + 1}. ${customer.customerName || '—'}`),
-        doc.page.width - 60,
-        y + 15,
-        { align: 'right' }
-      );
-    
+
+    // صندوق العميل
+    softBox(doc, boxX, y, boxWidth, 120);
+
+    // اسم العميل
+    doc.font('Arabic').fontSize(12).fillColor('#0A2A43');
+    drawRTLText(
+      doc,
+      `${index + 1}. ${customer.customerName || '—'}`,
+      boxX,
+      y + 15,
+      boxWidth
+    );
+
+    // التفاصيل
     doc.fontSize(10).fillColor('#000');
-    
+
     const details = [
       `الكود: ${customer.customerCode || '—'}`,
       `الهاتف: ${customer.customerPhone || '—'}`,
@@ -188,19 +198,21 @@ function addCustomersToPDF(doc, data) {
       `إجمالي المبلغ: ${(customer.totalAmount || 0).toFixed(2)} ريال`,
       `نسبة النجاح: ${(customer.successRate || 0).toFixed(1)}%`
     ];
-    
+
     details.forEach((detail, i) => {
-      doc.text(
-        rtl(detail),
-        doc.page.width - 60,
-        y + 35 + (i * 15),
-        { align: 'right' }
+      drawRTLText(
+        doc,
+        detail,
+        boxX,
+        y + 40 + (i * 15),
+        boxWidth
       );
     });
-    
-    doc.moveDown(6);
+
+    doc.moveDown(7);
   });
 }
+
 
 function addDriversToPDF(doc, data) {
   sectionTitle(doc, 'تفاصيل السائقين');
