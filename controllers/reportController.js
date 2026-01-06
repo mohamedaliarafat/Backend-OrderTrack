@@ -1070,6 +1070,246 @@ exports.invoiceReport = async (req, res) => {
 // ===============================
 // 📄 تصدير PDF - محدث
 // ===============================
+// exports.exportPDF = async (req, res) => {
+//   try {
+//     console.log('📥 EXPORT PDF QUERY:', req.query);
+
+//     const { reportType, startDate, endDate, ...filters } = req.query;
+
+//     let data;
+//     let title = '';
+//     let fileName = '';
+
+//     switch (reportType) {
+//       case 'customers':
+//         data = await getCustomerReportData({ ...filters, startDate, endDate });
+//         title = 'تقرير العملاء';
+//         fileName = 'customers-report';
+//         break;
+
+//       case 'drivers':
+//         data = await getDriverReportData({ ...filters, startDate, endDate });
+//         title = 'تقرير السائقين';
+//         fileName = 'drivers-report';
+//         break;
+
+//       case 'suppliers':
+//         data = await getSupplierReportData({ ...filters, startDate, endDate });
+//         title = 'تقرير الموردين';
+//         fileName = 'suppliers-report';
+//         break;
+
+//       case 'users':
+//         data = await getUserReportData({ ...filters, startDate, endDate });
+//         title = 'تقرير المستخدمين';
+//         fileName = 'users-report';
+//         break;
+
+//       default:
+//         return res.status(400).json({ error: 'نوع التقرير غير مدعوم' });
+//     }
+
+//     const doc = new PDFDocument({
+//       size: 'A4',
+//       margin: 40,
+//       bufferPages: true,
+//     });
+
+//     doc.registerFont('Arabic', FONT_AR);
+//     doc.font('Arabic');
+
+//     res.setHeader('Content-Type', 'application/pdf');
+//     res.setHeader(
+//       'Content-Disposition',
+//       `attachment; filename="${fileName}-${Date.now()}.pdf"`
+//     );
+
+//     doc.pipe(res);
+
+//     const headerOptions = {
+//       reportTitle: title,
+//       fromDate: startDate,
+//       toDate: endDate,
+//     };
+
+//     drawHeader(doc, headerOptions);
+
+//     doc.on('pageAdded', () => {
+//       drawHeader(doc, headerOptions);
+//     });
+
+//     doc.moveDown(6);
+
+//     sectionTitle(doc, 'الملخص');
+
+//     const summaryTop = doc.y;
+//     softBox(doc, 40, summaryTop, doc.page.width - 80, 100);
+
+//     doc
+//       .font('Arabic')
+//       .fontSize(11)
+//       .fillColor('#000')
+//       .text(
+//         rtl(`إجمالي العناصر: ${
+//           data.summary?.totalCustomers ??
+//           data.summary?.totalDrivers ??
+//           data.summary?.totalSuppliers ??
+//           data.summary?.totalUsers ??
+//           0
+//         }`),
+//         doc.page.width - 300,
+//         summaryTop + 20,
+//         { align: 'right' }
+//       )
+//       .text(
+//         rtl(`إجمالي الطلبات: ${data.summary?.totalOrders ?? 0}`),
+//         doc.page.width - 300,
+//         summaryTop + 45,
+//         { align: 'right' }
+//       )
+//       .text(
+//         rtl(`إجمالي المبلغ: ${data.summary?.totalAmount?.toFixed(2) ?? 0} ريال`),
+//         doc.page.width - 300,
+//         summaryTop + 70,
+//         { align: 'right' }
+//       );
+
+//     doc
+//       .font('Helvetica')
+//       .fontSize(11)
+//       .fillColor('#000')
+//       .text(
+//         `Total Items: ${
+//           data.summary?.totalCustomers ??
+//           data.summary?.totalDrivers ??
+//           data.summary?.totalSuppliers ??
+//           data.summary?.totalUsers ??
+//           0
+//         }`,
+//         60,
+//         summaryTop + 20
+//       )
+//       .text(
+//         `Total Orders: ${data.summary?.totalOrders ?? 0}`,
+//         60,
+//         summaryTop + 45
+//       )
+//       .text(
+//         `Total Amount: ${data.summary?.totalAmount?.toFixed(2) ?? 0} SAR`,
+//         60,
+//         summaryTop + 70
+//       );
+
+//     doc.moveDown(6);
+// switch (reportType) {
+//   case 'customers':
+//     if (data.customers && data.customers.length > 0) {
+//       addCustomersToPDF(doc, data);
+//     } else {
+//       drawRTLText(
+//         doc,
+//         'لا توجد بيانات لعرضها',
+//         40,
+//         doc.y + 20,
+//         doc.page.width - 80,
+//         { align: 'center' }
+//       );
+//     }
+//     break;
+
+//   case 'drivers':
+//     if (data.drivers && data.drivers.length > 0) {
+//       addDriversToPDF(doc, data);
+//     } else {
+//       drawRTLText(
+//         doc,
+//         'لا توجد بيانات لعرضها',
+//         40,
+//         doc.y + 20,
+//         doc.page.width - 80,
+//         { align: 'center' }
+//       );
+//     }
+//     break;
+
+//   case 'suppliers':
+//     if (data.suppliers && data.suppliers.length > 0) {
+//       addSuppliersToPDF(doc, data);
+//     } else {
+//       drawRTLText(
+//         doc,
+//         'لا توجد بيانات لعرضها',
+//         40,
+//         doc.y + 20,
+//         doc.page.width - 80,
+//         { align: 'center' }
+//       );
+//     }
+//     break;
+
+//   case 'users':
+//     if (data.users && data.users.length > 0) {
+//       addUsersToPDF(doc, data);
+//     } else {
+//       drawRTLText(
+//         doc,
+//         'لا توجد بيانات لعرضها',
+//         40,
+//         doc.y + 20,
+//         doc.page.width - 80,
+//         { align: 'center' }
+//       );
+//     }
+//     break;
+
+//   default:
+//     drawRTLText(
+//       doc,
+//       'نوع التقرير غير مدعوم',
+//       40,
+//       doc.y + 20,
+//       doc.page.width - 80,
+//       { align: 'center' }
+//     );
+//     break;
+// }
+
+
+//     const range = doc.bufferedPageRange();
+//     for (let i = range.start; i < range.start + range.count; i++) {
+//       doc.switchToPage(i);
+
+//       doc
+//         .fontSize(9)
+//         .fillColor('#555')
+//         .text(
+//           `Page ${i + 1} of ${range.count}`,
+//           40,
+//           doc.page.height - 40
+//         )
+//         .text(
+//           rtl(`تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}`),
+//           doc.page.width - 200,
+//           doc.page.height - 40,
+//           { align: 'right' }
+//         );
+//     }
+
+//     doc.end();
+
+//     console.log('✅ PDF GENERATED SUCCESSFULLY');
+//   } catch (error) {
+//     console.error('🔥 PDF EXPORT ERROR:', error);
+//     if (!res.headersSent) {
+//       res.status(500).json({
+//         error: 'حدث خطأ في تصدير PDF',
+//         details: error.message,
+//       });
+//     }
+//   }
+// };
+
+
 exports.exportPDF = async (req, res) => {
   try {
     console.log('📥 EXPORT PDF QUERY:', req.query);
@@ -1138,42 +1378,50 @@ exports.exportPDF = async (req, res) => {
       drawHeader(doc, headerOptions);
     });
 
-    doc.moveDown(6);
+    doc.moveDown(4);
 
+    // ===============================
+    // 📊 الملخص
+    // ===============================
     sectionTitle(doc, 'الملخص');
 
     const summaryTop = doc.y;
-    softBox(doc, 40, summaryTop, doc.page.width - 80, 100);
+    const summaryX = 40;
+    const summaryWidth = doc.page.width - 80;
 
-    doc
-      .font('Arabic')
-      .fontSize(11)
-      .fillColor('#000')
-      .text(
-        rtl(`إجمالي العناصر: ${
-          data.summary?.totalCustomers ??
-          data.summary?.totalDrivers ??
-          data.summary?.totalSuppliers ??
-          data.summary?.totalUsers ??
-          0
-        }`),
-        doc.page.width - 300,
-        summaryTop + 20,
-        { align: 'right' }
-      )
-      .text(
-        rtl(`إجمالي الطلبات: ${data.summary?.totalOrders ?? 0}`),
-        doc.page.width - 300,
-        summaryTop + 45,
-        { align: 'right' }
-      )
-      .text(
-        rtl(`إجمالي المبلغ: ${data.summary?.totalAmount?.toFixed(2) ?? 0} ريال`),
-        doc.page.width - 300,
-        summaryTop + 70,
-        { align: 'right' }
-      );
+    softBox(doc, summaryX, summaryTop, summaryWidth, 100);
 
+    drawRTLText(
+      doc,
+      `إجمالي العناصر: ${
+        data.summary?.totalCustomers ??
+        data.summary?.totalDrivers ??
+        data.summary?.totalSuppliers ??
+        data.summary?.totalUsers ??
+        0
+      }`,
+      summaryX,
+      summaryTop + 20,
+      summaryWidth
+    );
+
+    drawRTLText(
+      doc,
+      `إجمالي الطلبات: ${data.summary?.totalOrders ?? 0}`,
+      summaryX,
+      summaryTop + 45,
+      summaryWidth
+    );
+
+    drawRTLText(
+      doc,
+      `إجمالي المبلغ: ${data.summary?.totalAmount?.toFixed(2) ?? 0} ريال`,
+      summaryX,
+      summaryTop + 70,
+      summaryWidth
+    );
+
+    // English summary (LTR)
     doc
       .font('Helvetica')
       .fontSize(11)
@@ -1186,117 +1434,78 @@ exports.exportPDF = async (req, res) => {
           data.summary?.totalUsers ??
           0
         }`,
-        60,
+        summaryX + 10,
         summaryTop + 20
       )
       .text(
         `Total Orders: ${data.summary?.totalOrders ?? 0}`,
-        60,
+        summaryX + 10,
         summaryTop + 45
       )
       .text(
         `Total Amount: ${data.summary?.totalAmount?.toFixed(2) ?? 0} SAR`,
-        60,
+        summaryX + 10,
         summaryTop + 70
       );
 
+    doc.font('Arabic');
     doc.moveDown(6);
-switch (reportType) {
-  case 'customers':
-    if (data.customers && data.customers.length > 0) {
-      addCustomersToPDF(doc, data);
-    } else {
-      drawRTLText(
-        doc,
-        'لا توجد بيانات لعرضها',
-        40,
-        doc.y + 20,
-        doc.page.width - 80,
-        { align: 'center' }
-      );
+
+    // ===============================
+    // 📄 تفاصيل التقرير
+    // ===============================
+    switch (reportType) {
+      case 'customers':
+        data.customers?.length
+          ? addCustomersToPDF(doc, data)
+          : drawRTLText(doc, 'لا توجد بيانات لعرضها', 40, doc.y + 20, summaryWidth, { align: 'center' });
+        break;
+
+      case 'drivers':
+        data.drivers?.length
+          ? addDriversToPDF(doc, data)
+          : drawRTLText(doc, 'لا توجد بيانات لعرضها', 40, doc.y + 20, summaryWidth, { align: 'center' });
+        break;
+
+      case 'suppliers':
+        data.suppliers?.length
+          ? addSuppliersToPDF(doc, data)
+          : drawRTLText(doc, 'لا توجد بيانات لعرضها', 40, doc.y + 20, summaryWidth, { align: 'center' });
+        break;
+
+      case 'users':
+        data.users?.length
+          ? addUsersToPDF(doc, data)
+          : drawRTLText(doc, 'لا توجد بيانات لعرضها', 40, doc.y + 20, summaryWidth, { align: 'center' });
+        break;
     }
-    break;
 
-  case 'drivers':
-    if (data.drivers && data.drivers.length > 0) {
-      addDriversToPDF(doc, data);
-    } else {
-      drawRTLText(
-        doc,
-        'لا توجد بيانات لعرضها',
-        40,
-        doc.y + 20,
-        doc.page.width - 80,
-        { align: 'center' }
-      );
-    }
-    break;
-
-  case 'suppliers':
-    if (data.suppliers && data.suppliers.length > 0) {
-      addSuppliersToPDF(doc, data);
-    } else {
-      drawRTLText(
-        doc,
-        'لا توجد بيانات لعرضها',
-        40,
-        doc.y + 20,
-        doc.page.width - 80,
-        { align: 'center' }
-      );
-    }
-    break;
-
-  case 'users':
-    if (data.users && data.users.length > 0) {
-      addUsersToPDF(doc, data);
-    } else {
-      drawRTLText(
-        doc,
-        'لا توجد بيانات لعرضها',
-        40,
-        doc.y + 20,
-        doc.page.width - 80,
-        { align: 'center' }
-      );
-    }
-    break;
-
-  default:
-    drawRTLText(
-      doc,
-      'نوع التقرير غير مدعوم',
-      40,
-      doc.y + 20,
-      doc.page.width - 80,
-      { align: 'center' }
-    );
-    break;
-}
-
-
+    // ===============================
+    // 📎 Footer
+    // ===============================
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
 
-      doc
-        .fontSize(9)
-        .fillColor('#555')
-        .text(
-          `Page ${i + 1} of ${range.count}`,
-          40,
-          doc.page.height - 40
-        )
-        .text(
-          rtl(`تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}`),
-          doc.page.width - 200,
-          doc.page.height - 40,
-          { align: 'right' }
-        );
+      doc.fontSize(9).fillColor('#555');
+
+      doc.text(
+        `Page ${i + 1} of ${range.count}`,
+        40,
+        doc.page.height - 40
+      );
+
+      drawRTLText(
+        doc,
+        `تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}`,
+        40,
+        doc.page.height - 40,
+        doc.page.width - 80,
+        { align: 'right' }
+      );
     }
 
     doc.end();
-
     console.log('✅ PDF GENERATED SUCCESSFULLY');
   } catch (error) {
     console.error('🔥 PDF EXPORT ERROR:', error);
@@ -1308,6 +1517,7 @@ switch (reportType) {
     }
   }
 };
+
 
 // ===============================
 // 📊 تصدير Excel - محدث
