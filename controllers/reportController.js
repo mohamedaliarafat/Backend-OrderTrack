@@ -16,6 +16,22 @@ const bidi = require('bidi-js');
 const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
 const FONT_AR = path.join(__dirname, '../assets/fonts/Cairo-Regular.ttf');
 
+
+function drawRTLText(doc, text, x, y, width, options = {}) {
+  doc.text(
+    rtl(text),
+    x,
+    y,
+    {
+      width,
+      align: 'right',
+      lineGap: 4,
+      ...options,
+    }
+  );
+}
+
+
 // ===============================
 // 📊 Services
 // ===============================
@@ -1185,40 +1201,79 @@ exports.exportPDF = async (req, res) => {
       );
 
     doc.moveDown(6);
-
-    switch (reportType) {
-      case 'customers':
-        if (data.customers && data.customers.length > 0) {
-          addCustomersToPDF(doc, data);
-        } else {
-          doc.text(rtl('لا توجد بيانات لعرضها'), { align: 'center' });
-        }
-        break;
-
-      case 'drivers':
-        if (data.drivers && data.drivers.length > 0) {
-          addDriversToPDF(doc, data);
-        } else {
-          doc.text(rtl('لا توجد بيانات لعرضها'), { align: 'center' });
-        }
-        break;
-
-      case 'suppliers':
-        if (data.suppliers && data.suppliers.length > 0) {
-          addSuppliersToPDF(doc, data);
-        } else {
-          doc.text(rtl('لا توجد بيانات لعرضها'), { align: 'center' });
-        }
-        break;
-
-      case 'users':
-        if (data.users && data.users.length > 0) {
-          addUsersToPDF(doc, data);
-        } else {
-          doc.text(rtl('لا توجد بيانات لعرضها'), { align: 'center' });
-        }
-        break;
+switch (reportType) {
+  case 'customers':
+    if (data.customers && data.customers.length > 0) {
+      addCustomersToPDF(doc, data);
+    } else {
+      drawRTLText(
+        doc,
+        'لا توجد بيانات لعرضها',
+        40,
+        doc.y + 20,
+        doc.page.width - 80,
+        { align: 'center' }
+      );
     }
+    break;
+
+  case 'drivers':
+    if (data.drivers && data.drivers.length > 0) {
+      addDriversToPDF(doc, data);
+    } else {
+      drawRTLText(
+        doc,
+        'لا توجد بيانات لعرضها',
+        40,
+        doc.y + 20,
+        doc.page.width - 80,
+        { align: 'center' }
+      );
+    }
+    break;
+
+  case 'suppliers':
+    if (data.suppliers && data.suppliers.length > 0) {
+      addSuppliersToPDF(doc, data);
+    } else {
+      drawRTLText(
+        doc,
+        'لا توجد بيانات لعرضها',
+        40,
+        doc.y + 20,
+        doc.page.width - 80,
+        { align: 'center' }
+      );
+    }
+    break;
+
+  case 'users':
+    if (data.users && data.users.length > 0) {
+      addUsersToPDF(doc, data);
+    } else {
+      drawRTLText(
+        doc,
+        'لا توجد بيانات لعرضها',
+        40,
+        doc.y + 20,
+        doc.page.width - 80,
+        { align: 'center' }
+      );
+    }
+    break;
+
+  default:
+    drawRTLText(
+      doc,
+      'نوع التقرير غير مدعوم',
+      40,
+      doc.y + 20,
+      doc.page.width - 80,
+      { align: 'center' }
+    );
+    break;
+}
+
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
