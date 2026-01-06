@@ -163,54 +163,87 @@ function drawHeader(doc, { fromDate, toDate, reportTitle }) {
 function addCustomersToPDF(doc, data) {
   sectionTitle(doc, 'تفاصيل العملاء');
 
-  const boxX = 40;
-  const boxWidth = doc.page.width - 80;
+  const startX = 40;
+  const tableWidth = doc.page.width - 80;
+  const rowHeight = 24;
+
+  // أعمدة الجدول (RTL)
+  const columns = [
+    { key: 'index', label: '#', width: 30 },
+    { key: 'name', label: 'اسم العميل', width: 150 },
+    { key: 'phone', label: 'الهاتف', width: 95 },
+    { key: 'city', label: 'المدينة', width: 85 },
+    { key: 'orders', label: 'عدد الطلبات', width: 80 },
+    { key: 'amount', label: 'إجمالي المبلغ', width: 95 },
+    { key: 'success', label: 'نسبة النجاح %', width: 85 },
+  ];
+
+  let y = doc.y + 10;
+
+  // ===============================
+  // 🟦 Header Row
+  // ===============================
+  doc.fontSize(10).fillColor('#0A2A43');
+  let x = startX + tableWidth;
+
+  columns.forEach(col => {
+    x -= col.width;
+    doc
+      .rect(x, y, col.width, rowHeight)
+      .fillAndStroke('#F2F6FA', '#0A2A43');
+
+    drawRTLText(doc, col.label, x + 4, y + 6, col.width - 8);
+  });
+
+  y += rowHeight;
+
+  // ===============================
+  // 📄 Data Rows
+  // ===============================
+  doc.fontSize(9).fillColor('#000');
 
   data.customers.forEach((customer, index) => {
-    // 🔥 حماية كسر الصفحة
-    if (doc.y > doc.page.height - 160) {
+    // كسر الصفحة
+    if (y > doc.page.height - 60) {
       doc.addPage();
+      y = 60;
+
+      // إعادة رسم Header
+      x = startX + tableWidth;
+      columns.forEach(col => {
+        x -= col.width;
+        doc
+          .rect(x, y, col.width, rowHeight)
+          .fillAndStroke('#F2F6FA', '#0A2A43');
+        drawRTLText(doc, col.label, x + 4, y + 6, col.width - 8);
+      });
+      y += rowHeight;
     }
 
-    const y = doc.y;
-
-    // صندوق العميل
-    softBox(doc, boxX, y, boxWidth, 120);
-
-    // اسم العميل
-    doc.font('Arabic').fontSize(12).fillColor('#0A2A43');
-    drawRTLText(
-      doc,
-      `${index + 1}. ${customer.customerName || '—'}`,
-      boxX,
-      y + 15,
-      boxWidth
-    );
-
-    // التفاصيل
-    doc.fontSize(10).fillColor('#000');
-
-    const details = [
-      `الكود: ${customer.customerCode || '—'}`,
-      `الهاتف: ${customer.customerPhone || '—'}`,
-      `المدينة: ${customer.customerCity || '—'}`,
-      `عدد الطلبات: ${customer.totalOrders || 0}`,
-      `إجمالي المبلغ: ${(customer.totalAmount || 0).toFixed(2)} ريال`,
-      `نسبة النجاح: ${(customer.successRate || 0).toFixed(1)}%`
+    const row = [
+      index + 1,
+      customer.customerName || '—',
+      customer.customerPhone || '—',
+      customer.customerCity || '—',
+      customer.totalOrders || 0,
+      `${(customer.totalAmount || 0).toFixed(2)} ر.س`,
+      `${(customer.successRate || 0).toFixed(1)}%`,
     ];
 
-    details.forEach((detail, i) => {
-      drawRTLText(
-        doc,
-        detail,
-        boxX,
-        y + 40 + (i * 15),
-        boxWidth
-      );
+    x = startX + tableWidth;
+
+    row.forEach((cell, i) => {
+      const col = columns[i];
+      x -= col.width;
+
+      doc.rect(x, y, col.width, rowHeight).stroke('#D0D7E2');
+      drawRTLText(doc, String(cell), x + 4, y + 6, col.width - 8);
     });
 
-    doc.moveDown(7);
+    y += rowHeight;
   });
+
+  doc.moveDown(2);
 }
 
 
