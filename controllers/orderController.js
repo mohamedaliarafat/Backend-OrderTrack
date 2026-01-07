@@ -1879,6 +1879,10 @@ exports.sendArrivalReminder = async (req, res) => {
 // ============================================
 
 exports.updateOrder = async (req, res) => {
+
+  console.log('🔥 UPDATE ORDER HIT');
+  console.log('BODY:', req.body);
+  console.log('FILE:', req.file);
   try {
     upload(req, res, async (err) => {
       if (err) {
