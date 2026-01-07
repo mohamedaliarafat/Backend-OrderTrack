@@ -5,6 +5,20 @@ const reportController = require('../controllers/reportController');
 const filterController = require('../controllers/filterController');
 const { authMiddleware, adminMiddleware } = require('../middleware/authMiddleware');
 
+const multer = require('multer');
+
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  },
+});
+
+const upload = multer({ storage });
+
 // إضافة middleware للمديرين
 const managerMiddleware = (req, res, next) => {
   if (!req.user) {
@@ -88,7 +102,12 @@ router.get('/', orderController.getOrders);
 router.get('/:id', orderController.getOrder);
 
 // تحديث الطلب
-router.put('/:id', orderController.updateOrder);
+router.put(
+  '/:id',
+  upload.single('attachment'), // 👈 مهم جدًا
+  orderController.updateOrder
+);
+
 
 // تحديث حالة الطلب (للإداريين والمديرين فقط)
 router.patch('/:id/status', managerMiddleware, orderController.updateOrderStatus);
