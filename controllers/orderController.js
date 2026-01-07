@@ -1887,17 +1887,24 @@ exports.updateOrder = async (req, res) => {
 
       const order = await Order.findById(req.params.id)
         .populate('customer', 'name code phone email city area address')
-        .populate('supplier', 'name company contactPerson phone address');
+        .populate('supplier', 'name company contactPerson phone address')
+        .populate('driver', 'name phone vehicleNumber');
 
       if (!order) {
         return res.status(404).json({ error: 'الطلب غير موجود' });
       }
 
       // ============================================
+      // 🧠 تحديد نوع الطلب
+      // ============================================
+      const isCustomerOrder = order.orderSource === 'عميل';
+      const isSupplierOrder = order.orderSource === 'مورد';
+
+      // ============================================
       // 🧩 الحقول المسموح تعديلها
       // ============================================
-      const allowedUpdates = [
-        'customer', // ⭐ تمت الإضافة
+      const baseAllowedUpdates = [
+        'customer',
         'driver', 'driverName', 'driverPhone', 'vehicleNumber',
         'notes', 'supplierNotes', 'customerNotes', 'internalNotes',
         'actualArrivalTime', 'loadingDuration', 'delayReason',
@@ -1905,8 +1912,20 @@ exports.updateOrder = async (req, res) => {
         'unitPrice', 'totalPrice', 'paymentMethod', 'paymentStatus',
         'city', 'area', 'address',
         'loadingDate', 'loadingTime', 'arrivalDate', 'arrivalTime',
-        'status', 'mergeStatus'
+        'status', 'mergeStatus',
+        'requestType'
       ];
+
+      const forbiddenForSupplier = ['supplierOrderNumber', 'supplierName'];
+
+      const allowedUpdates = isSupplierOrder
+        ? baseAllowedUpdates.filter(
+            (f) => !forbiddenForSupplier.includes(f)
+          )
+        : baseAllowedUpdates;
+
+      // حماية إضافية
+      forbiddenForSupplier.forEach((field) => delete req.body[field]);
 
       const updates = {};
       Object.keys(req.body).forEach((key) => {
@@ -1916,13 +1935,12 @@ exports.updateOrder = async (req, res) => {
       });
 
       // ============================================
-      // 👤 تغيير العميل (مضاف بدون حذف أي منطق)
+      // 👤 تغيير العميل
       // ============================================
       const oldCustomerId = order.customer?._id?.toString();
 
       if (updates.customer && updates.customer !== oldCustomerId) {
         const newCustomer = await Customer.findById(updates.customer);
-
         if (!newCustomer) {
           return res.status(400).json({ error: 'العميل الجديد غير موجود' });
         }
@@ -1931,9 +1949,8 @@ exports.updateOrder = async (req, res) => {
         order.customerName = newCustomer.name;
         order.customerCode = newCustomer.code;
         order.customerPhone = newCustomer.phone;
-        order.customerEmail = newCustomer.email;
+        order.customerEmail = newCustomer.email ?? null;
 
-        // تحديث الموقع من العميل الجديد إذا لم يُرسل من الفرونت
         order.city = updates.city ?? newCustomer.city;
         order.area = updates.area ?? newCustomer.area;
         order.address = updates.address ?? newCustomer.address;
@@ -1958,17 +1975,29 @@ exports.updateOrder = async (req, res) => {
       }
 
       // ============================================
-      // 📍 تحديث موقع العميل (كما هو بدون حذف)
+      // 🔄 تغيير نوع العملية (شراء / نقل)
+      // ============================================
+      if ('requestType' in updates) {
+        order.requestType = updates.requestType;
+        if (updates.requestType === 'شراء') {
+          order.driver = null;
+          order.driverName = null;
+          order.driverPhone = null;
+          order.vehicleNumber = null;
+        }
+      }
+
+      // ============================================
+      // 📍 تحديث موقع العميل
       // ============================================
       if (
         ('city' in updates || 'area' in updates || 'address' in updates) &&
-        order.customer &&
-        typeof order.customer === 'object'
+        order.customer
       ) {
         await Customer.findByIdAndUpdate(order.customer._id, {
-          city: updates.city || order.customer.city,
-          area: updates.area || order.customer.area,
-          address: updates.address || order.customer.address
+          city: updates.city ?? order.customer.city,
+          area: updates.area ?? order.customer.area,
+          address: updates.address ?? order.customer.address,
         });
       }
 
@@ -1981,64 +2010,14 @@ exports.updateOrder = async (req, res) => {
       // ============================================
       // 📎 الملفات
       // ============================================
-      if (req.files) {
-        if (req.files.attachments) {
-          const newAttachments = req.files.attachments.map((file) => ({
-            filename: file.originalname,
-            path: file.path,
-            uploadedAt: new Date(),
-            uploadedBy: req.user._id
-          }));
-          updates.attachments = [...order.attachments, ...newAttachments];
-        }
-
-        if (req.files.supplierDocuments) {
-          const newDocs = req.files.supplierDocuments.map((file) => ({
-            type: 'أخرى',
-            filename: file.originalname,
-            path: file.path,
-            uploadedAt: new Date()
-          }));
-          updates.supplierDocuments = [...order.supplierDocuments, ...newDocs];
-        }
-
-        if (req.files.customerDocuments) {
-          const newDocs = req.files.customerDocuments.map((file) => ({
-            type: 'أخرى',
-            filename: file.originalname,
-            path: file.path,
-            uploadedAt: new Date()
-          }));
-          updates.customerDocuments = [...order.customerDocuments, ...newDocs];
-        }
-      }
-
-      // ============================================
-      // ⏱️ وقت الوصول الفعلي + منطق التنفيذ التلقائي
-      // ============================================
-      if ('actualArrivalTime' in updates && updates.actualArrivalTime) {
-        const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        if (!timeRegex.test(updates.actualArrivalTime)) {
-          return res.status(400).json({
-            error: 'تنسيق الوقت غير صحيح. استخدم HH:MM',
-          });
-        }
-
-        if (
-          ['جاهز للتحميل', 'في انتظار التحميل', 'في الطريق'].includes(order.status)
-        ) {
-          order.loadingCompletedAt = new Date();
-
-          if (!updates.status) {
-            if (order.orderSource === 'مدمج') {
-              updates.status = 'تم التنفيذ';
-              updates.mergeStatus = 'مكتمل';
-              order.completedAt = new Date();
-            } else {
-              updates.status = 'تم التحميل';
-            }
-          }
-        }
+      if (req.files?.attachments) {
+        const newAttachments = req.files.attachments.map((file) => ({
+          filename: file.originalname,
+          path: file.path,
+          uploadedAt: new Date(),
+          uploadedBy: req.user._id,
+        }));
+        updates.attachments = [...order.attachments, ...newAttachments];
       }
 
       // ============================================
@@ -2047,7 +2026,7 @@ exports.updateOrder = async (req, res) => {
       const oldData = { ...order.toObject() };
 
       // ============================================
-      // 💾 تحديث الطلب
+      // 💾 حفظ الطلب
       // ============================================
       Object.assign(order, updates);
       order.updatedAt = new Date();
@@ -2057,12 +2036,12 @@ exports.updateOrder = async (req, res) => {
       // 📝 حساب التغييرات
       // ============================================
       const changes = {};
-      const excludedKeys = ['attachments', 'supplierDocuments', 'customerDocuments', 'updatedAt'];
+      const excluded = ['attachments', 'updatedAt'];
 
       Object.keys(updates).forEach((key) => {
-        if (!excludedKeys.includes(key)) {
-          if (JSON.stringify(oldData[key]) !== JSON.stringify(updates[key])) {
-            changes[key] = `من: ${oldData[key] ?? 'غير محدد'} → إلى: ${updates[key] ?? 'غير محدد'}`;
+        if (!excluded.includes(key)) {
+          if (JSON.stringify(oldData[key]) !== JSON.stringify(order[key])) {
+            changes[key] = `من: ${oldData[key] ?? 'غير محدد'} → إلى: ${order[key] ?? 'غير محدد'}`;
           }
         }
       });
@@ -2070,7 +2049,7 @@ exports.updateOrder = async (req, res) => {
       // ============================================
       // 📋 Activity
       // ============================================
-      if (Object.keys(changes).length > 0) {
+      if (Object.keys(changes).length) {
         await Activity.create({
           orderId: order._id,
           activityType: 'تعديل',
@@ -2082,13 +2061,31 @@ exports.updateOrder = async (req, res) => {
       }
 
       // ============================================
+      // 📧 إرسال الإيميل
+      // ============================================
+      if (Object.keys(changes).length && order.customerEmail) {
+        await sendEmail({
+          to: order.customerEmail,
+          subject: `تم تعديل طلبك رقم ${order.orderNumber}`,
+          html: `
+            <h3>مرحبًا ${order.customerName}</h3>
+            <p>تم تعديل طلبك، وهذه أهم التغييرات:</p>
+            <ul>
+              ${Object.values(changes).map(c => `<li>${c}</li>`).join('')}
+            </ul>
+            <p>شكراً لتعاملكم معنا</p>
+          `,
+        });
+      }
+
+      // ============================================
       // 📤 الرد
       // ============================================
       const populatedOrder = await Order.findById(order._id)
         .populate('customer', 'name code phone email city area address')
         .populate('supplier', 'name company contactPerson phone address')
-        .populate('createdBy', 'name email')
-        .populate('driver', 'name phone vehicleNumber');
+        .populate('driver', 'name phone vehicleNumber')
+        .populate('createdBy', 'name email');
 
       return res.json({
         message: 'تم تحديث الطلب بنجاح',
