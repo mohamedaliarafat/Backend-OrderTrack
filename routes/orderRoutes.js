@@ -35,7 +35,6 @@ const managerMiddleware = (req, res, next) => {
 // جميع المسارات تتطلب مصادقة
 router.use(authMiddleware);
 
-<<<<<<< HEAD
 
 // ============================================
 // 🔗 مسارات الدمج
@@ -137,81 +136,6 @@ router.delete('/:id', adminMiddleware, orderController.deleteOrder);
 
 // حذف مرفق عام
 router.delete('/:orderId/attachments/:attachmentId', orderController.deleteAttachment);
-// حذف مستند مورد
-router.delete('/:orderId/supplier-docs/:docId', orderController.deleteAttachment);
-
-// حذف مستند عميل
-router.delete('/:orderId/customer-docs/:docId', orderController.deleteAttachment);
-
-router.get('/reports/customers', reportController.customerReports);
-
-// تقارير السائقين
-router.get('/reports/drivers', reportController.driverReports);
-
-// تقارير الموردين
-router.get('/reports/suppliers', reportController.supplierReports);
-
-// تقارير المستخدمين
-router.get('/reports/users', reportController.userReports);
-
-// تقرير فاتورة محددة
-router.get('/reports/invoice/:orderId', reportController.invoiceReport);
-
-// تصدير PDF
-router.get('/reports/export/pdf', reportController.exportPDF);
-
-// تصدير Excel
-router.get('/reports/export/excel', reportController.exportExcel);
-
-// ============================================
-// 🔍 مسارات الفلاتر
-// ============================================
-
-// خيارات الفلاتر
-router.get('/filters/options', filterController.getFilterOptions);
-
-// بحث ذكي
-router.get('/filters/search', filterController.smartSearch);
-
-// إحصائيات الفلاتر
-router.post('/filters/stats', filterController.getFilterStats);
-=======
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
-
-
-
-
-
-
-// ============================================
-// 📋 مسارات الطلبات الأساسية
-// ============================================
-
-router.post('/', orderController.createOrder);
-router.get('/', orderController.getOrders);
-router.get('/:id', orderController.getOrder);
-
-// تحديث الطلب
-router.put(
-  '/:id',
-  upload.single('attachment'), // 👈 مهم جدًا
-  orderController.updateOrder
-);
-
-
-// تحديث حالة الطلب (للإداريين والمديرين فقط)
-router.patch('/:id/status', managerMiddleware, orderController.updateOrderStatus);
-
-// حذف الطلب (للإداريين فقط)
-router.delete('/:id', adminMiddleware, orderController.deleteOrder);
-
-// ============================================
-// 📎 مسارات المرفقات
-// ============================================
-
-// حذف مرفق عام
-router.delete('/:orderId/attachments/:attachmentId', orderController.deleteAttachment);
-
 // حذف مستند مورد
 router.delete('/:orderId/supplier-docs/:docId', orderController.deleteAttachment);
 
