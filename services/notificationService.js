@@ -1,9 +1,9 @@
-const Notification = require('../models/Notification');
+﻿const Notification = require('../models/Notification');
 const Device = require('../models/Device');
 const RealtimeService = require('./realtime.service');
 const { initFirebase } = require('../config/firebase');
-const { sendEmail } = require('../utils/emailService'); // Resend
-const templates = require('../utils/emailTemplates');   // عندك
+const { sendEmail } = require('./emailService');
+const templates = require('./emailTemplates');
 
 class NotificationService {
   static async send({
@@ -16,24 +16,24 @@ class NotificationService {
     createdBy,
     orderId,
     platforms = ['web', 'android', 'ios', 'desktop'],
-    channels = ['in_app', 'push', 'email'], // خليها حسب الحدث
+    channels = ['in_app', 'push', 'email'],
+    extraEmails = []
   }) {
-    // 1) create DB notification
     const notification = await Notification.create({
       type,
       title,
       message,
       data,
-      recipients: recipients.map(user => ({ user })),
+      recipients: recipients.map((user) => ({ user })),
       priority,
       createdBy,
       orderId,
-      platforms: platforms.filter(p => p !== 'desktop'), // push للـ desktop لا
+      platforms: platforms.filter((p) => p !== 'desktop'),
       channels: channels.filter(Boolean),
       sendStatus: 'pending'
     });
 
-    // 2) realtime (web/desktop)
+    // realtime in-app
     for (const userId of recipients) {
       RealtimeService.sendToUser(userId, {
         type: 'notification',
@@ -44,12 +44,11 @@ class NotificationService {
           message,
           priority,
           orderId,
-          createdAt: notification.createdAt,
+          createdAt: notification.createdAt
         }
       });
     }
 
-    // 3) Push via FCM
     if (channels.includes('push')) {
       await this._sendPushFCM({
         notificationId: notification._id,
@@ -57,11 +56,10 @@ class NotificationService {
         message,
         data,
         recipients,
-        platforms,
+        platforms
       });
     }
 
-    // 4) Email
     if (channels.includes('email')) {
       await this._sendEmail({
         type,
@@ -69,6 +67,7 @@ class NotificationService {
         message,
         data,
         recipients,
+        extraEmails
       });
     }
 
@@ -78,12 +77,115 @@ class NotificationService {
     return notification;
   }
 
-  static async _sendPushFCM({ notificationId, title, message, data, recipients, platforms }) {
+  static async sendToAll({
+    type,
+    title,
+    message,
+    data = {},
+    priority = 'medium',
+    createdBy,
+    orderId,
+    platforms,
+    channels,
+    extraEmails = []
+  }) {
+    const User = require('../models/User');
+    const users = await User.find({}).select('_id email').lean();
+    const recipients = users.map((user) => user._id);
+
+    return this.send({
+      type,
+      title,
+      message,
+      data: {
+        ...data,
+        recipientsCount: users.length
+      },
+      recipients,
+      priority,
+      createdBy,
+      orderId,
+      platforms,
+      channels,
+      extraEmails
+    });
+  }
+
+  static async notifyLoadingReminder(order, minutes) {
+    return this.sendToAll({
+      type: 'loading_reminder',
+      title: `تذكير بتحميل الطلب ${order.orderNumber}`,
+      message: `باقي ${minutes} دقيقة على موعد التحميل.`,
+      data: {
+        order: order,
+        note: `موعد التحميل: ${order.loadingDate} ${order.loadingTime}`
+      },
+      orderId: order._id,
+      priority: 'medium'
+    });
+  }
+
+  static async notifyArrivalReminder(order, hours) {
+    return this.sendToAll({
+      type: 'arrival_reminder',
+      title: `تذكير بوصول الطلب ${order.orderNumber}`,
+      message: `باقي ${hours} ساعة على موعد الوصول.`,
+      data: {
+        order: order,
+        note: `موعد الوصول: ${order.arrivalDate} ${order.arrivalTime}`
+      },
+      orderId: order._id,
+      priority: 'medium'
+    });
+  }
+
+  static async notifyOrderOverdue(order) {
+    return this.sendToAll({
+      type: 'order_overdue',
+      title: `طلب متأخر ${order.orderNumber}`,
+      message: 'تم رصد طلب متأخر عن الجدول الزمني.',
+      data: { order },
+      orderId: order._id,
+      priority: 'high'
+    });
+  }
+
+  static async notifyLoadingCompleted(order, actor) {
+    return this.sendToAll({
+      type: 'loading_completed',
+      title: `اكتمال تحميل الطلب ${order.orderNumber}`,
+      message: 'تم اكتمال تحميل الطلب بنجاح.',
+      data: {
+        order,
+        actorName: actor?.name || 'النظام'
+      },
+      orderId: order._id,
+      priority: 'medium'
+    });
+  }
+
+  static async notifySystemAlert(title, message, priority = 'urgent') {
+    return this.sendToAll({
+      type: 'system_alert',
+      title,
+      message,
+      priority,
+      channels: ['in_app', 'email']
+    });
+  }
+
+  static async _sendPushFCM({
+    notificationId,
+    title,
+    message,
+    data,
+    recipients,
+    platforms
+  }) {
     const admin = initFirebase();
     if (!admin) return;
 
-    // desktop excluded by design
-    const pushPlatforms = platforms.filter(p => p !== 'desktop');
+    const pushPlatforms = (platforms || []).filter((p) => p !== 'desktop');
 
     const devices = await Device.find({
       user: { $in: recipients },
@@ -91,64 +193,75 @@ class NotificationService {
       isActive: true
     }).select('token platform user');
 
-    const tokens = [...new Set(devices.map(d => d.token).filter(Boolean))];
+    const tokens = [...new Set(devices.map((d) => d.token).filter(Boolean))];
     if (!tokens.length) return;
 
-    // FCM data must be string values
     const payloadData = {};
-    Object.entries({ ...data, notificationId: String(notificationId) }).forEach(([k, v]) => {
-      payloadData[k] = v == null ? '' : String(v);
-    });
+    Object.entries({ ...data, notificationId: String(notificationId) }).forEach(
+      ([k, v]) => {
+        payloadData[k] = v == null ? '' : String(v);
+      }
+    );
 
-    // multicast (limit 500 tokens)
     const chunks = [];
-    for (let i = 0; i < tokens.length; i += 500) chunks.push(tokens.slice(i, i + 500));
+    for (let i = 0; i < tokens.length; i += 500) {
+      chunks.push(tokens.slice(i, i + 500));
+    }
 
     for (const chunk of chunks) {
       try {
         const resp = await admin.messaging().sendEachForMulticast({
           tokens: chunk,
           notification: { title, body: message },
-          data: payloadData,
+          data: payloadData
         });
 
-        // لو فيه توكنات فاشلة: عطّلها
         resp.responses.forEach(async (r, idx) => {
           if (!r.success) {
             const badToken = chunk[idx];
             const errCode = r.error?.code || '';
             if (errCode.includes('registration-token-not-registered')) {
-              await Device.updateOne({ token: badToken }, { $set: { isActive: false } });
+              await Device.updateOne(
+                { token: badToken },
+                { $set: { isActive: false } }
+              );
             }
           }
         });
       } catch (e) {
-        console.error('❌ FCM send error:', e?.message || e);
+        console.error('FCM send error:', e?.message || e);
       }
     }
   }
 
-  static async _sendEmail({ type, title, message, data, recipients }) {
-    // هنا أنت عندك util getOrderRecipients للإيميل
-    // الأفضل: نجيب إيميلات المستخدمين مباشرة من User
+  static async _sendEmail({ type, title, message, data, recipients, extraEmails }) {
     const User = require('../models/User');
-    const users = await User.find({ _id: { $in: recipients } }).select('email name');
-    const emails = users.map(u => u.email).filter(Boolean);
+    const users = await User.find({ _id: { $in: recipients } }).select('email');
+    const baseEmails = users.map((u) => u.email).filter(Boolean);
+    const allEmails = [...new Set([...baseEmails, ...(extraEmails || [])])];
 
-    if (!emails.length) return;
+    if (!allEmails.length) return;
 
-    // استخدم templates لو تحب
-    const html = `
-      <div style="font-family:Arial;padding:20px">
-        <h2>${title}</h2>
-        <p>${message}</p>
-      </div>
-    `;
+    const html = templates.orderEventTemplate({
+      title,
+      message,
+      order: data?.order,
+      actorName: data?.actorName,
+      changes: data?.changes,
+      note: data?.note,
+      recipientsCount: data?.recipientsCount,
+      badge: data?.badge || 'إشعار تلقائي'
+    });
 
     try {
-      await sendEmail({ to: emails, subject: title, html });
+      await sendEmail({
+        to: [],
+        bcc: allEmails,
+        subject: title,
+        html
+      });
     } catch (e) {
-      console.error('❌ Email send error:', e?.message || e);
+      console.error('Email send error:', e?.message || e);
     }
   }
 }

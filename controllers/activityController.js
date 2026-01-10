@@ -45,6 +45,9 @@ exports.getActivities = async (req, res) => {
   }
 };
 
+
+
+
 // Add manual activity
 exports.addActivity = async (req, res) => {
   try {

@@ -5,16 +5,112 @@ const reportController = require('../controllers/reportController');
 const filterController = require('../controllers/filterController');
 const { authMiddleware, adminMiddleware } = require('../middleware/authMiddleware');
 
+const multer = require('multer');
+
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  },
+});
+
+const upload = multer({ storage });
+
 // إضافة middleware للمديرين
 const managerMiddleware = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'غير مصرح (لا يوجد مستخدم)' });
+  }
+
   if (req.user.role !== 'admin' && req.user.role !== 'manager') {
     return res.status(403).json({ error: 'غير مسموح بالوصول' });
   }
+
   next();
 };
 
 // جميع المسارات تتطلب مصادقة
 router.use(authMiddleware);
+
+
+// ============================================
+// 🔗 مسارات الدمج
+// ============================================
+
+// دمج الطلبات (للإداريين والمديرين)
+router.post('/merge', managerMiddleware, orderController.mergeOrders);
+
+// فك دمج الطلب
+router.post('/:id/unmerge', managerMiddleware, async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const Activity = require('../models/Activity');
+    const NotificationService = require('../services/notificationService');
+
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ error: '????? ??? ?????' });
+    }
+
+
+    
+    
+    if (order.mergeStatus !== 'مدمج') {
+      return res.status(400).json({ error: 'الطلب غير مدمج' });
+    }
+    
+    // إعادة تعيين حالة الدمج
+    order.mergeStatus = 'منفصل';
+    order.originalOrderId = null;
+    order.mergedOrderId = null;
+    order.mergedAt = null;
+    await order.save();
+    
+    // تسجيل النشاط
+    const activity = new Activity({
+      orderId: order._id,
+      activityType: 'فك دمج',
+      description: `تم فك دمج الطلب رقم ${order.orderNumber}`,
+      performedBy: req.user._id,
+      performedByName: req.user.name,
+      changes: {
+        'حالة الدمج': 'من: مدمج → إلى: منفصل'
+      },
+    });
+    await activity.save();
+
+    await NotificationService.sendToAll({
+      type: 'order_unmerged',
+      title: '?? ?? ?????',
+      message: `?? ?? ??? ????? ${order.orderNumber} ?????.`,
+      data: {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        orderSource: order.orderSource
+      },
+      createdBy: req.user._id,
+      orderId: order._id,
+      channels: ['in_app', 'email'],
+      extraEmails: [order.customerEmail, order.supplierEmail].filter(Boolean)
+    });
+    
+    res.json({
+      message: 'تم فك دمج الطلب بنجاح',
+      order
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'حدث خطأ في فك الدمج' });
+  }
+});
+
+
+
+
 
 // ============================================
 // 📋 مسارات الطلبات الأساسية
@@ -26,6 +122,7 @@ router.get('/:id', orderController.getOrder);
 
 // تحديث الطلب
 router.put('/:id', orderController.updateOrder);
+
 
 // تحديث حالة الطلب (للإداريين والمديرين فقط)
 router.patch('/:id/status', managerMiddleware, orderController.updateOrderStatus);
@@ -39,7 +136,6 @@ router.delete('/:id', adminMiddleware, orderController.deleteOrder);
 
 // حذف مرفق عام
 router.delete('/:orderId/attachments/:attachmentId', orderController.deleteAttachment);
-
 // حذف مستند مورد
 router.delete('/:orderId/supplier-docs/:docId', orderController.deleteAttachment);
 
@@ -79,58 +175,6 @@ router.get('/filters/search', filterController.smartSearch);
 // إحصائيات الفلاتر
 router.post('/filters/stats', filterController.getFilterStats);
 
-// ============================================
-// 🔗 مسارات الدمج
-// ============================================
-
-// دمج الطلبات (للإداريين والمديرين)
-router.post('/merge', managerMiddleware, orderController.mergeOrders);
-
-// فك دمج الطلب
-router.post('/:id/unmerge', managerMiddleware, async (req, res) => {
-  try {
-    const Order = require('../models/Order');
-    const Activity = require('../models/Activity');
-    
-    const order = await Order.findById(req.params.id);
-    
-    if (!order) {
-      return res.status(404).json({ error: 'الطلب غير موجود' });
-    }
-    
-    if (order.mergeStatus !== 'مدمج') {
-      return res.status(400).json({ error: 'الطلب غير مدمج' });
-    }
-    
-    // إعادة تعيين حالة الدمج
-    order.mergeStatus = 'منفصل';
-    order.originalOrderId = null;
-    order.mergedOrderId = null;
-    order.mergedAt = null;
-    await order.save();
-    
-    // تسجيل النشاط
-    const activity = new Activity({
-      orderId: order._id,
-      activityType: 'فك دمج',
-      description: `تم فك دمج الطلب رقم ${order.orderNumber}`,
-      performedBy: req.user._id,
-      performedByName: req.user.name,
-      changes: {
-        'حالة الدمج': 'من: مدمج → إلى: منفصل'
-      },
-    });
-    await activity.save();
-    
-    res.json({
-      message: 'تم فك دمج الطلب بنجاح',
-      order
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في فك الدمج' });
-  }
-});
 
 
 

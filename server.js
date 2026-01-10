@@ -17,6 +17,7 @@ const driverRoutes = require('./routes/driverRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
+const maintenanceRoutes = require('./routes/maintenanceRoutes');
 
 
 // Initialize Express app
@@ -46,6 +47,7 @@ app.use('/api/drivers', driverRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/devices', deviceRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

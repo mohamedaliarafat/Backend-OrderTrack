@@ -13,6 +13,11 @@ const notificationSchema = new mongoose.Schema({
       'loading_completed',
       'order_cancelled',
       'status_changed',
+      'order_merged',
+      'order_unmerged',
+      'order_deleted',
+      'attachment_added',
+      'attachment_removed',
       'system_alert'
     ],
     required: true

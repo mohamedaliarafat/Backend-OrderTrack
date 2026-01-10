@@ -9,15 +9,18 @@ const orderSchema = new mongoose.Schema({
     required: true,
     default: Date.now
   },
- orderNumber: {
+  
+  orderNumber: {
+    type: String,
+    unique: true
+  },
+  
+  supplierOrderNumber: {
   type: String,
-  unique: true
+  trim: true,
+  index: true
 },
 
-supplierOrderNumber: {
-  type: String,
-  trim: true
-},
   
   // ⭐ حقل حاسم: مصدر الطلب
   orderSource: {
@@ -27,23 +30,32 @@ supplierOrderNumber: {
     default: 'مورد'
   },
   
-  // ⭐ حالة الدمج (إذا كان الطلب مدمج)
+  // ⭐ حالة الدمج
   mergeStatus: {
     type: String,
     enum: ['منفصل', 'في انتظار الدمج', 'مدمج', 'مكتمل'],
     default: 'منفصل'
   },
+
+  // ⭐ هل هذا الطلب نسخة دمج؟
+isMergedCopy: {
+  type: Boolean,
+  default: false
+},
+
   
-  // ⭐ معرف الطلب الأصلي (للدمج)
-  originalOrderId: {
+  // ⭐ معرف الطلب المدمج معه
+  mergedWithOrderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Order'
   },
   
-  // ⭐ معرف الطلب المدمج (إذا كان هذا هو الطلب الأصلي)
-  mergedOrderId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Order'
+  // ⭐ معلومات الطرف المدمج معه
+  mergedWithInfo: {
+    orderNumber: String,           // رقم طلب الطرف الآخر
+    partyName: String,             // اسم الطرف الآخر
+    partyType: String,             // نوع الطرف (مورد/عميل)
+    mergedAt: Date                 // وقت الدمج
   },
   
   // ============================================
@@ -75,24 +87,23 @@ supplierOrderNumber: {
     type: String
   },
   
-  // ⭐ العميل (مطلوب للجميع)
-customer: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'Customer',
-  required: function () {
-    return this.orderSource === 'عميل';
-  }
-},
-
+  // ⭐ العميل (مطلوب لطلبات العميل)
+  customer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    required: function () {
+      return this.orderSource === 'عميل';
+    }
+  },
   
   // معلومات العميل (نسخ احتياطية)
   customerName: {
-  type: String,
-  required: function () {
-    return this.orderSource === 'عميل';
-  }
-},
-
+    type: String,
+    required: function () {
+      return this.orderSource === 'عميل';
+    }
+  },
+  
   customerCode: {
     type: String,
     trim: true
@@ -103,70 +114,49 @@ customer: {
   customerEmail: {
     type: String
   },
-
+  
   requestType: {
-  type: String,
-  enum: ['شراء', 'نقل'],
-  default: 'شراء',
-},
+    type: String,
+    enum: ['شراء', 'نقل'],
+    required: function () {
+      return this.orderSource === 'عميل';
+    },
+    default: function () {
+      if (this.orderSource === 'عميل') {
+        return 'شراء';
+      }
+      return undefined;
+    }
+  },
   
   // ============================================
   // 📍 معلومات الموقع
   // ============================================
-city: {
-  type: String,
-  required: function () {
-    return true; // مطلوب دايمًا لكن هيتملأ قبل التحقق
-  }
-},
-area: {
-  type: String,
-  required: function () {
-    return true;
-  }
-},
-address: {
-  type: String,
-  required: function () {
-    return true;
-  }
-},
-
-
-deliveryDuration: {
-  type: Number, // المدة بالدقائق
-  min: 0
-},
-distance: {
-  type: Number, // المسافة بالكيلومتر
-  min: 0
-},
-driverEarnings: {
-  type: Number,
-  min: 0
-},
-
-// في driverSchema:
-totalEarnings: {
-  type: Number,
-  default: 0
-},
-totalDistance: {
-  type: Number,
-  default: 0
-},
-totalDeliveries: {
-  type: Number,
-  default: 0
-},
-averageRating: {
-  type: Number,
-  min: 0,
-  max: 5,
-  default: 0
-},
-
-
+  city: {
+    type: String,
+    required: true
+  },
+  area: {
+    type: String,
+    required: true
+  },
+  address: {
+    type: String,
+    required: true
+  },
+  
+  deliveryDuration: {
+    type: Number,
+    min: 0
+  },
+  distance: {
+    type: Number,
+    min: 0
+  },
+  driverEarnings: {
+    type: Number,
+    min: 0
+  },
   
   // ============================================
   // ⏰ معلومات التوقيت
@@ -191,38 +181,55 @@ averageRating: {
   },
   
   // ============================================
-  // 📊 حالة الطلب
+  // 📊 حالة الطلب - محدثة حسب متطلباتك
   // ============================================
   status: {
     type: String,
     enum: [
-      // حالات المورد
-      'في انتظار عمل طلب جديد',
-      'تم التأكيد من المورد',
-      'جاهز للشحن',
+      // ========== طلبات المورد ==========
+      'قيد الإنشاء',              // الحالة الابتدائية
+      'تم الإنشاء',               // بعد إنشاء الطلب
+      'في انتظار الدمج',          // جاهز للدمج
+      'تم دمجه مع العميل',        // بعد الدمج (يظهر اسم العميل ورقم طلبه)
+      'جاهز للتحميل',            // جاهز للتحميل
+      'تم التحميل',              // تم التحميل
+      'في الطريق',               // قيد التوصيل
+      'تم التسليم',              // تم التوصيل
       
-      // حالات العميل
-      'في انتظار عمل طلب جديد',
-      'تم إنشاء طلب العميل',
-      'في انتظار تأكيد العميل',
-      'تم تأكيد العميل',
-
-       'مدمج وجاهز للتنفيذ',
-
-       'تم دمجه',
-
+      // ========== طلبات العميل ==========
+      'في انتظار التخصيص',        // ينتظر تخصيص مورد
+      'تم تخصيص طلب المورد',      // تم تخصيص طلب مورد (يظهر اسم المورد ورقم طلبه)
+      'في انتظار الدمج',          // جاهز للدمج
+      'تم دمجه مع المورد',        // بعد الدمج
+      'في انتظار التحميل',       // منتظر تحميل المورد
+      'في الطريق',               // قيد التوصيل
+      'تم التسليم',              // تم الاستلام
       
-      // حالات مشتركة
-      'تم دمجه',
-      'في انتظار التحميل',
-      'مدمج وجاهز للتنفيذ',
-      'تم التنفيذ',
-      'في الطريق',
-      'تم التنفيذ',
+      // ========== الطلبات المدمجة ==========
+      'تم الدمج',                // مباشرة بعد الدمج
+      'مخصص للعميل',             // تم تخصيصها للعميل
+      'جاهز للتحميل',            // جاهز للتحميل
+      'تم التحميل',              // تم التحميل
+      'في الطريق',               // قيد التوصيل
+      'تم التسليم',              // تم التوصيل
+      'تم التنفيذ',              // بعد انتهاء الوقت
+      
+      // ========== حالات عامة ==========
       'ملغى',
       'مكتمل'
     ],
-    default: 'في انتظار عمل طلب جديد'
+    default: function() {
+      switch(this.orderSource) {
+        case 'مورد':
+          return 'قيد الإنشاء';
+        case 'عميل':
+          return 'في انتظار التخصيص';
+        case 'مدمج':
+          return 'تم الدمج';
+        default:
+          return 'قيد الإنشاء';
+      }
+    }
   },
   
   // ============================================
@@ -297,30 +304,18 @@ averageRating: {
     type: String
   },
   
-  supplierNotes: { // ملاحظات خاصة بالمورد
+  supplierNotes: {
     type: String
   },
   
-  customerNotes: { // ملاحظات خاصة بالعميل
+  customerNotes: {
     type: String
   },
   
-  internalNotes: { // ملاحظات داخلية
+  internalNotes: {
     type: String
   },
-
-  customerWaitingStartedAt: {
-  type: Date
-  },
-
-  customerWaitingDeadline: {
-    type: Date // = startedAt + 24 ساعة
-  },
-
-  customerWarningSentAt: {
-    type: Date
-  },
-
+  
   cancellationReason: {
     type: String
   },
@@ -341,14 +336,14 @@ averageRating: {
     }
   }],
   
-  supplierDocuments: [{ // مستندات المورد
+  supplierDocuments: [{
     type: { type: String, enum: ['فاتورة', 'عقد', 'شهادة', 'أخرى'] },
     filename: String,
     path: String,
     uploadedAt: Date
   }],
   
-  customerDocuments: [{ // مستندات العميل
+  customerDocuments: [{
     type: { type: String, enum: ['طلب', 'موافقة', 'فاتورة', 'أخرى'] },
     filename: String,
     path: String,
@@ -415,12 +410,6 @@ averageRating: {
     type: String
   },
   
-  // منشئ الطلب الأصلي
-  originalCreator: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  
   // ============================================
   // 📅 التواريخ
   // ============================================
@@ -434,12 +423,6 @@ averageRating: {
   },
   
   // تواريخ خاصة
-  supplierConfirmedAt: {
-    type: Date
-  },
-  customerConfirmedAt: {
-    type: Date
-  },
   mergedAt: {
     type: Date
   },
@@ -449,45 +432,27 @@ averageRating: {
 });
 
 // ============================================
-// 📍 تعبئة الموقع قبل الـ validation (حل جذري)
+// 📍 تعبئة الموقع قبل الـ validation
 // ============================================
 orderSchema.pre('validate', async function (next) {
   try {
     // ===== طلب مورد =====
     if (this.orderSource === 'مورد' && this.supplier) {
       const supplier = await mongoose.model('Supplier').findById(this.supplier);
-
       if (supplier) {
-        if (!this.city && supplier.city) {
-          this.city = supplier.city;
-        }
-
-        if (!this.area && supplier.area) {
-          this.area = supplier.area;
-        }
-
-        if (!this.address && supplier.address) {
-          this.address = supplier.address;
-        }
+        if (!this.city) this.city = supplier.city;
+        if (!this.area) this.area = supplier.area;
+        if (!this.address) this.address = supplier.address;
       }
     }
 
     // ===== طلب عميل =====
     if (this.orderSource === 'عميل' && this.customer) {
       const customer = await mongoose.model('Customer').findById(this.customer);
-
       if (customer) {
-        if (!this.city && customer.city) {
-          this.city = customer.city;
-        }
-
-        if (!this.area && customer.area) {
-          this.area = customer.area;
-        }
-
-        if (!this.address && customer.address) {
-          this.address = customer.address;
-        }
+        if (!this.city) this.city = customer.city;
+        if (!this.area) this.area = customer.area;
+        if (!this.address) this.address = customer.address;
       }
     }
 
@@ -498,212 +463,218 @@ orderSchema.pre('validate', async function (next) {
   }
 });
 
-
 // ============================================
-// 📝 Middleware قبل الحفظ - تم التعديل
+// 📝 Middleware قبل الحفظ - محدث
 // ============================================
-
-// توليد رقم طلب تلقائي
 orderSchema.pre('save', async function (next) {
-  // =========================
-  // 🆔 توليد رقم الطلب
-  // =========================
-  if (!this.orderNumber) {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-
-    let prefix;
-    switch (this.orderSource) {
-      case 'مورد':
-        prefix = 'SUP';
-        break;
-      case 'عميل':
-        prefix = 'CUS';
-        break;
-      case 'مدمج':
-        prefix = 'MIX';
-        break;
-      default:
-        prefix = 'ORD';
+  try {
+    // =========================
+    // 🆔 توليد رقم الطلب
+    // =========================
+    if (!this.orderNumber) {
+      await this.generateOrderNumber();
     }
 
-    try {
-      const lastOrder = await mongoose.model('Order').findOne({
-        orderNumber: new RegExp(`^${prefix}-${year}${month}${day}-`)
-      }).sort({ orderNumber: -1 });
+    // =========================
+    // 🕒 تحديث وقت التعديل
+    // =========================
+    this.updatedAt = new Date();
 
-      let sequence = 1;
-      if (lastOrder?.orderNumber) {
-        sequence = parseInt(lastOrder.orderNumber.split('-').pop()) + 1;
-      }
-
-      this.orderNumber = `${prefix}-${year}${month}${day}-${String(sequence).padStart(4, '0')}`;
-    } catch {
-      this.orderNumber = `${prefix}-${year}${month}${day}-0001`;
+    // =========================
+    // 💰 حساب السعر
+    // =========================
+    if (this.quantity && this.unitPrice) {
+      this.totalPrice = this.quantity * this.unitPrice;
     }
+
+    // =========================
+    // 👤 تعبئة بيانات العميل
+    // =========================
+    if (this.customer && !this.customerName) {
+      await this.populateCustomerData();
+    }
+
+    // =========================
+    // 🏭 تعبئة بيانات المورد
+    // =========================
+    if (this.supplier) {
+      await this.populateSupplierData();
+    }
+
+    // =========================
+    // 🚚 تعبئة بيانات السائق
+    // =========================
+    if (this.driver && !this.driverName) {
+      await this.populateDriverData();
+    }
+
+    // =========================
+    // 👤 اسم منشئ الطلب
+    // =========================
+    if (!this.createdByName && this.createdBy) {
+      await this.populateCreatorData();
+    }
+
+    next();
+  } catch (error) {
+    console.error('Error in pre-save middleware:', error);
+    next(error);
+  }
+});
+
+// ============================================
+// 🔧 دوال المساعدة الجديدة
+// ============================================
+
+// دالة لتوليد رقم الطلب
+orderSchema.methods.generateOrderNumber = async function() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+
+  let prefix;
+  switch (this.orderSource) {
+    case 'مورد':
+      prefix = 'SUP';
+      break;
+    case 'عميل':
+      prefix = 'CUS';
+      break;
+    case 'مدمج':
+      prefix = 'MIX';
+      break;
+    default:
+      prefix = 'ORD';
   }
 
-  // =========================
-  // 🕒 تحديث وقت التعديل
-  // =========================
-  this.updatedAt = new Date();
+  try {
+    const lastOrder = await mongoose.model('Order').findOne({
+      orderNumber: new RegExp(`^${prefix}-${year}${month}${day}-`)
+    }).sort({ orderNumber: -1 });
 
-  // =========================
-  // 🧾 حالة طلب العميل + المهلة
-  // =========================
-  if (this.orderSource === 'عميل') {
-    // الحالة الافتراضية
-    if (!this.status) {
-      this.status = 'في انتظار إنشاء طلب العميل';
+    let sequence = 1;
+    if (lastOrder?.orderNumber) {
+      sequence = parseInt(lastOrder.orderNumber.split('-').pop()) + 1;
     }
 
-    // ⏱️ بدء مهلة 24 ساعة (مرة واحدة فقط)
-    if (
-      this.status === 'في انتظار إنشاء طلب العميل' &&
-      !this.customerWaitingStartedAt
-    ) {
-      const now = new Date();
-      this.customerWaitingStartedAt = now;
-      this.customerWaitingDeadline = new Date(
-        now.getTime() + 24 * 60 * 60 * 1000
-      );
+    this.orderNumber = `${prefix}-${year}${month}${day}-${String(sequence).padStart(4, '0')}`;
+  } catch {
+    this.orderNumber = `${prefix}-${year}${month}${day}-0001`;
+  }
+};
+
+// دالة لتعبئة بيانات العميل
+orderSchema.methods.populateCustomerData = async function() {
+  try {
+    const customer = await mongoose.model('Customer').findById(this.customer);
+    if (customer) {
+      this.customerName = customer.name || '';
+      this.customerCode = customer.code || '';
+      this.customerPhone = customer.phone || '';
+      this.customerEmail = customer.email || '';
     }
+  } catch (e) {
+    console.error('Error populating customer:', e);
   }
+};
 
-  // =========================
-  // 💰 حساب السعر
-  // =========================
-  if (this.quantity && this.unitPrice) {
-    this.totalPrice = this.quantity * this.unitPrice;
-  }
-
-  // =========================
-  // 👤 تعبئة بيانات العميل
-  // =========================
-  if (!this.customerName && this.customer) {
-    try {
-      const customer = await mongoose.model('Customer').findById(this.customer);
-      if (customer) {
-        this.customerName = customer.name || '';
-        this.customerCode = customer.code || '';
-        this.customerPhone = customer.phone || '';
-        this.customerEmail = customer.email || '';
-
-        if (!this.city && customer.city) this.city = customer.city;
-        if (!this.area && customer.area) this.area = customer.area;
-        if (!this.address && customer.address) this.address = customer.address;
-      }
-    } catch (e) {
-      console.error('Error populating customer:', e);
-    }
-  }
-
-  // =========================
-  // 🏭 تعبئة بيانات المورد
-  // =========================
-  if (this.supplier) {
+// دالة لتعبئة بيانات المورد
+orderSchema.methods.populateSupplierData = async function() {
   try {
     const supplier = await mongoose.model('Supplier').findById(this.supplier);
     if (supplier) {
-      if (!this.supplierName) this.supplierName = supplier.name || '';
-      if (!this.supplierCompany) this.supplierCompany = supplier.company || '';
-      if (!this.supplierContactPerson)
-        this.supplierContactPerson = supplier.contactPerson || '';
-      if (!this.supplierPhone) this.supplierPhone = supplier.phone || '';
-
-      // 🔴 المهم جدًا
-      if (!this.supplierAddress && supplier.address) {
-        this.supplierAddress = supplier.address;
-      }
+      this.supplierName = supplier.name || '';
+      this.supplierCompany = supplier.company || '';
+      this.supplierContactPerson = supplier.contactPerson || '';
+      this.supplierPhone = supplier.phone || '';
+      this.supplierAddress = supplier.address || '';
     }
   } catch (e) {
     console.error('Error populating supplier:', e);
   }
-}
+};
 
-  // =========================
-  // 🚚 تعبئة بيانات السائق
-  // =========================
-  if (this.driver && !this.driverName) {
-    try {
-      const driver = await mongoose.model('Driver').findById(this.driver);
-      if (driver) {
-        this.driverName = driver.name || '';
-        this.driverPhone = driver.phone || '';
-        this.vehicleNumber = driver.vehicleNumber || '';
-      }
-    } catch (e) {
-      console.error('Error populating driver:', e);
+// دالة لتعبئة بيانات السائق
+orderSchema.methods.populateDriverData = async function() {
+  try {
+    const driver = await mongoose.model('Driver').findById(this.driver);
+    if (driver) {
+      this.driverName = driver.name || '';
+      this.driverPhone = driver.phone || '';
+      this.vehicleNumber = driver.vehicleNumber || '';
     }
-  }
-
-  // =========================
-  // 👤 اسم منشئ الطلب
-  // =========================
-  if (!this.createdByName && this.createdBy) {
-    try {
-      const user = await mongoose.model('User').findById(this.createdBy);
-      if (user) {
-        this.createdByName = user.name || '';
-      }
-    } catch (e) {
-      console.error('Error populating creator:', e);
-    }
-  }
-
-  // ❌ لا نغيّر حالة طلب العميل تلقائيًا هنا
-  // يتم التغيير فقط عند الدمج أو عبر cron
-
-  next();
-});
-
-
-
-// ============================================
-// 🔧 دوال المساعدة - أضف تعريفها هنا
-// ============================================
-
-// تحديث الحالة بناءً على الوقت
-orderSchema.methods.updateStatusBasedOnTime = function() {
-  const now = new Date();
-  const arrivalDateTime = this.getFullArrivalDateTime();
-  const loadingDateTime = this.getFullLoadingDateTime();
-  
-  // إذا كان طلب عميل وتحول من "في انتظار إنشاء" إلى "تم إنشاء"
-  if (this.orderSource === 'عميل' && this.status === 'في انتظار إنشاء طلب العميل') {
-    this.status = 'تم إنشاء طلب العميل';
-  }
-  
-  // إذا حان وقت الوصول
-  if (now >= arrivalDateTime && ['تم إنشاء طلب العميل', 'في انتظار عمل طلب جديد', 'تم تأكيد العميل'].includes(this.status)) {
-    this.status = 'في انتظار التحميل';
-  }
-  
-  // إذا حان وقت التحميل
-  if (now >= loadingDateTime && ['في انتظار التحميل'].includes(this.status)) {
-    this.status = 'مدمج وجاهز للتنفيذ';
+  } catch (e) {
+    console.error('Error populating driver:', e);
   }
 };
 
-
-
-// تحديث المؤقتات
-orderSchema.methods.updateTimers = function() {
-  const now = new Date();
-  const arrivalDateTime = this.getFullArrivalDateTime();
-  const loadingDateTime = this.getFullLoadingDateTime();
-  
-  const twoAndHalfHours = 2.5 * 60 * 60 * 1000;
-  const arrivalRemaining = arrivalDateTime - now;
-  const loadingRemaining = loadingDateTime - now;
-  
-  this.hasArrivalTimer = arrivalRemaining > 0 && arrivalRemaining <= twoAndHalfHours;
-  this.hasLoadingTimer = loadingRemaining > 0 && loadingRemaining <= twoAndHalfHours;
+// دالة لتعبئة بيانات المنشئ
+orderSchema.methods.populateCreatorData = async function() {
+  try {
+    const user = await mongoose.model('User').findById(this.createdBy);
+    if (user) {
+      this.createdByName = user.name || '';
+    }
+  } catch (e) {
+    console.error('Error populating creator:', e);
+  }
 };
 
-// الحصول على وقت التحميل الكامل
+// دالة لتعيين معلومات الدمج
+orderSchema.methods.setMergeInfo = async function(targetOrder) {
+  this.mergedWithOrderId = targetOrder._id;
+  this.mergedWithInfo = {
+    orderNumber: targetOrder.orderNumber,
+    partyName: targetOrder.orderSource === 'مورد' ? 
+              targetOrder.supplierName : 
+              targetOrder.customerName,
+    partyType: targetOrder.orderSource,
+    mergedAt: new Date()
+  };
+  
+  // تحديث حالة الطلب بناءً على نوعه
+  if (this.orderSource === 'مورد') {
+    this.status = 'تم دمجه مع العميل';
+    this.mergeStatus = 'مدمج';
+  } else if (this.orderSource === 'عميل') {
+    this.status = 'تم دمجه مع المورد';
+    this.mergeStatus = 'مدمج';
+  } else {
+    this.status = 'تم الدمج';
+    this.mergeStatus = 'مدمج';
+  }
+  
+  this.mergedAt = new Date();
+};
+
+// دالة للحصول على معلومات الطلب المدمج
+orderSchema.methods.getMergePartnerInfo = async function() {
+  if (!this.mergedWithOrderId) return null;
+  
+  try {
+    const partnerOrder = await mongoose.model('Order')
+      .findById(this.mergedWithOrderId)
+      .select('orderNumber customerName supplierName orderSource');
+    
+    if (!partnerOrder) return null;
+    
+    return {
+      orderNumber: partnerOrder.orderNumber,
+      name: partnerOrder.orderSource === 'مورد' ? 
+            partnerOrder.supplierName : 
+            partnerOrder.customerName,
+      type: partnerOrder.orderSource === 'مورد' ? 'مورد' : 'عميل'
+    };
+  } catch (error) {
+    console.error('Error getting merge partner info:', error);
+    return null;
+  }
+};
+
+// ============================================
+// ⏰ دوال التوقيت (كما هي)
+// ============================================
 orderSchema.methods.getFullLoadingDateTime = function() {
   try {
     if (!this.loadingDate || !this.loadingTime) {
@@ -719,7 +690,6 @@ orderSchema.methods.getFullLoadingDateTime = function() {
   }
 };
 
-// الحصول على وقت الوصول الكامل
 orderSchema.methods.getFullArrivalDateTime = function() {
   try {
     if (!this.arrivalDate || !this.arrivalTime) {
@@ -735,105 +705,41 @@ orderSchema.methods.getFullArrivalDateTime = function() {
   }
 };
 
-// وقت الإشعار قبل الوصول
-orderSchema.methods.getArrivalNotificationTime = function() {
-  const arrivalDateTime = this.getFullArrivalDateTime();
-  const notificationTime = new Date(arrivalDateTime);
-  notificationTime.setHours(notificationTime.getHours() - 2);
-  notificationTime.setMinutes(notificationTime.getMinutes() - 30);
-  return notificationTime;
-};
-
-// وقت الإشعار قبل التحميل
-orderSchema.methods.getLoadingNotificationTime = function() {
-  const loadingDateTime = this.getFullLoadingDateTime();
-  const notificationTime = new Date(loadingDateTime);
-  notificationTime.setHours(notificationTime.getHours() - 2);
-  notificationTime.setMinutes(notificationTime.getMinutes() - 30);
-  return notificationTime;
-};
-
-// الوقت المتبقي للوصول
-orderSchema.methods.getArrivalRemaining = function() {
-  const arrivalDateTime = this.getFullArrivalDateTime();
-  const now = new Date();
-  return arrivalDateTime - now;
-};
-
-// الوقت المتبقي للتحميل
-orderSchema.methods.getLoadingRemaining = function() {
-  const loadingDateTime = this.getFullLoadingDateTime();
-  const now = new Date();
-  return loadingDateTime - now;
-};
-
-// تنسيق الوقت المتبقي للوصول
-orderSchema.methods.getFormattedArrivalCountdown = function() {
-  const remaining = this.getArrivalRemaining();
-  
-  if (remaining <= 0) {
-    return 'تأخر';
-  }
-  
-  const totalSeconds = Math.floor(remaining / 1000);
-  const days = Math.floor(totalSeconds / (3600 * 24));
-  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  
-  const parts = [];
-  if (days > 0) parts.push(`${days} يوم`);
-  if (hours > 0) parts.push(`${hours} ساعة`);
-  if (minutes > 0) parts.push(`${minutes} دقيقة`);
-  
-  return parts.join(' و ') || 'أقل من دقيقة';
-};
-
-// تنسيق الوقت المتبقي للتحميل
-orderSchema.methods.getFormattedLoadingCountdown = function() {
-  const remaining = this.getLoadingRemaining();
-  
-  if (remaining <= 0) {
-    return 'تأخر';
-  }
-  
-  const totalSeconds = Math.floor(remaining / 1000);
-  const days = Math.floor(totalSeconds / (3600 * 24));
-  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  
-  const parts = [];
-  if (days > 0) parts.push(`${days} يوم`);
-  if (hours > 0) parts.push(`${hours} ساعة`);
-  if (minutes > 0) parts.push(`${minutes} دقيقة`);
-  
-  return parts.join(' و ') || 'أقل من دقيقة';
-};
-
-// الحصول على معلومات العرض
+// ============================================
+// 📊 دوال العرض
+// ============================================
 orderSchema.methods.getDisplayInfo = function() {
-  return {
+  const info = {
     orderNumber: this.orderNumber,
     orderSource: this.orderSource,
-    orderSourceText: this.getOrderSourceText ? this.getOrderSourceText() : this.orderSource,
+    orderSourceText: this.getOrderSourceText(),
     supplierName: this.supplierName || 'غير محدد',
     customerName: this.customerName || 'غير محدد',
     status: this.status,
-    statusColor: this.getStatusColor ? this.getStatusColor() : '#757575',
-    location: this.getLocation ? this.getLocation() : 'غير محدد',
+    statusColor: this.getStatusColor(),
+    location: this.getLocation(),
     fuelType: this.fuelType,
     quantity: this.quantity,
     unit: this.unit,
-    arrivalCountdown: this.getFormattedArrivalCountdown(),
-    loadingCountdown: this.getFormattedLoadingCountdown(),
-    isLate: this.isArrivalOverdue ? this.isArrivalOverdue() || this.isLoadingOverdue() : false,
     mergeStatus: this.mergeStatus,
     totalPrice: this.totalPrice,
     paymentStatus: this.paymentStatus,
-    createdAt: this.createdAt
+    createdAt: this.createdAt,
+    mergedWithInfo: this.mergedWithInfo || null
   };
+  
+  // إضافة معلومات المدة
+  if (this.getFormattedArrivalCountdown) {
+    info.arrivalCountdown = this.getFormattedArrivalCountdown();
+  }
+  
+  if (this.getFormattedLoadingCountdown) {
+    info.loadingCountdown = this.getFormattedLoadingCountdown();
+  }
+  
+  return info;
 };
 
-// نص مصدر الطلب
 orderSchema.methods.getOrderSourceText = function() {
   switch(this.orderSource) {
     case 'مورد': return 'طلب مورد';
@@ -843,39 +749,45 @@ orderSchema.methods.getOrderSourceText = function() {
   }
 };
 
-// لون الحالة
 orderSchema.methods.getStatusColor = function() {
-  switch(this.status) {
-    case 'في انتظار إنشاء طلب العميل':
-    case 'في انتظار عمل طلب جديد':
-      return '#ff9800';
-    case 'تم إنشاء طلب العميل':
-    case 'تم التأكيد من المورد':
-      return '#2196f3';
-    case 'في انتظار تأكيد العميل':
-      return '#ff5722';
-    case 'تم تأكيد العميل':
-      return '#4caf50';
-    case 'تم دمجه':
-    case 'في انتظار التحميل':
-      return '#9c27b0';
-    case 'مدمج وجاهز للتنفيذ':
-      return '#00bcd4';
-    case 'تم التنفيذ':
-      return '#4caf50';
-    case 'في الطريق':
-      return '#3f51b5';
-    case 'تم التنفيذ':
-    case 'مكتمل':
-      return '#8bc34a';
-    case 'ملغى':
-      return '#f44336';
-    default:
-      return '#757575';
-  }
+  // ألوان حسب الحالة
+  const statusColors = {
+    // طلبات المورد
+    'قيد الإنشاء': '#ff9800',
+    'تم الإنشاء': '#2196f3',
+    'في انتظار الدمج': '#ff5722',
+    'تم دمجه مع العميل': '#9c27b0',
+    'جاهز للتحميل': '#00bcd4',
+    'تم التحميل': '#4caf50',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    
+    // طلبات العميل
+    'في انتظار التخصيص': '#ff9800',
+    'تم تخصيص طلب المورد': '#2196f3',
+    'في انتظار الدمج': '#ff5722',
+    'تم دمجه مع المورد': '#9c27b0',
+    'في انتظار التحميل': '#00bcd4',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    
+    // طلبات مدمجة
+    'تم الدمج': '#9c27b0',
+    'مخصص للعميل': '#2196f3',
+    'جاهز للتحميل': '#00bcd4',
+    'تم التحميل': '#4caf50',
+    'في الطريق': '#3f51b5',
+    'تم التسليم': '#8bc34a',
+    'تم التنفيذ': '#4caf50',
+    
+    // عامة
+    'ملغى': '#f44336',
+    'مكتمل': '#8bc34a'
+  };
+  
+  return statusColors[this.status] || '#757575';
 };
 
-// الموقع الكامل
 orderSchema.methods.getLocation = function() {
   if (this.city && this.area) {
     return `${this.city} - ${this.area}`;
@@ -883,22 +795,9 @@ orderSchema.methods.getLocation = function() {
   return this.city || this.area || 'غير محدد';
 };
 
-// تحقق من تأخر الوصول
-orderSchema.methods.isArrivalOverdue = function() {
-  const remaining = this.getArrivalRemaining();
-  return remaining < 0;
-};
-
-// تحقق من تأخر التحميل
-orderSchema.methods.isLoadingOverdue = function() {
-  const remaining = this.getLoadingRemaining();
-  return remaining < 0;
-};
-
 // ============================================
 // 📊 Indexes
 // ============================================
-
 orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ orderDate: 1 });
@@ -918,7 +817,6 @@ orderSchema.index({ createdAt: -1 });
 // ============================================
 // 📋 Virtuals
 // ============================================
-
 orderSchema.virtual('isMerged').get(function() {
   return this.mergeStatus === 'مدمج' || this.mergeStatus === 'مكتمل';
 });
@@ -938,5 +836,18 @@ orderSchema.virtual('isCustomerOrder').get(function() {
 orderSchema.virtual('isMixedOrder').get(function() {
   return this.orderSource === 'مدمج';
 });
+
+orderSchema.index(
+  { supplier: 1, supplierOrderNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      supplier: { $exists: true },
+      supplierOrderNumber: { $exists: true, $ne: null, $ne: '' }
+    }
+  }
+);
+
+
 
 module.exports = mongoose.model('Order', orderSchema);
