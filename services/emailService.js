@@ -3,23 +3,6 @@ const nodemailer = require('nodemailer');
 // ===============================
 // ⚙️ SMTP Configuration
 // ===============================
-const SMTP_HOST = process.env.SMTP_HOST || process.env.EMAIL_HOST || 'mail-eu.smtp2go.com';
-const SMTP_PORT = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 2525);
-const SMTP_USER = process.env.SMTP_USER || process.env.EMAIL_USER;
-const SMTP_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-const SMTP_SECURE =
-  String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || SMTP_PORT === 465;
-
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_SECURE,
-  auth: SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-});
-
 const transporter = nodemailer.createTransport({
   host: 'mail-eu.smtp2go.com',
   port: 2525, // 🔥 غيرنا البورت
@@ -32,7 +15,6 @@ const transporter = nodemailer.createTransport({
   greetingTimeout: 10000,
   socketTimeout: 10000,
 });
-
 
 
 // ===============================
@@ -55,7 +37,9 @@ const normalizeEmails = (to) => {
     .filter((e) => e && e.includes('@'));
 };
 
-
+// ===============================
+// 📤 Send Email (Production Safe)
+// ===============================
 // ===============================
 // 📤 Send Email (Supports TO + BCC)
 // ===============================
@@ -103,6 +87,3 @@ exports.sendEmail = async ({ to, bcc, subject, html, replyTo }) => {
     throw error;
   }
 };
-
-=======
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
