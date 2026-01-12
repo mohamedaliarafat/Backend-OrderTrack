@@ -3,18 +3,14 @@ const nodemailer = require('nodemailer');
 // ===============================
 // ⚙️ SMTP Configuration
 // ===============================
-const SMTP_HOST = process.env.SMTP_HOST || process.env.EMAIL_HOST || 'mail-eu.smtp2go.com';
-const SMTP_PORT = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 2525);
-const SMTP_USER = process.env.SMTP_USER || process.env.EMAIL_USER;
-const SMTP_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-const SMTP_SECURE =
-  String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || SMTP_PORT === 465;
-
 const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_SECURE,
-  auth: SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+  host: 'mail-eu.smtp2go.com',
+  port: 2525, // 🔥 غيرنا البورت
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
   connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 10000,
@@ -91,5 +87,3 @@ exports.sendEmail = async ({ to, bcc, subject, html, replyTo }) => {
     throw error;
   }
 };
-
-
