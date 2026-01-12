@@ -66,248 +66,6 @@ function formatDuration(milliseconds) {
 
 
 
-// exports.createOrder = async (req, res) => {
-//   try {
-//     upload(req, res, async (err) => {
-//       if (err) {
-//         return res.status(400).json({ error: err.message });
-//       }
-
-//       const orderData = { ...req.body };
-
-//       // ==================================================
-//       // 🚫 امنع إدخال status / orderNumber يدويًا
-//       // ==================================================
-//       delete orderData.status;
-//       delete orderData.orderNumber;
-
-//       // ==================================================
-//       // 🧭 تحديد مصدر الطلب
-//       // ==================================================
-//       orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
-
-//       // ==================================================
-//       // 👤 العميل مطلوب لطلبات العملاء
-//       // ==================================================
-//       if (orderData.orderSource === 'عميل' && !orderData.customer) {
-//         return res.status(400).json({
-//           error: 'العميل مطلوب لطلبات العملاء',
-//         });
-//       }
-
-//       // ==================================================
-//       // ✅ نوع العملية (شراء | نقل) — للعملاء فقط
-//       // ==================================================
-//       const allowedRequestTypes = ['شراء', 'نقل'];
-
-//       if (orderData.orderSource === 'عميل') {
-//         orderData.requestType = orderData.requestType || 'شراء';
-
-//         if (!allowedRequestTypes.includes(orderData.requestType)) {
-//           return res.status(400).json({
-//             error: 'نوع العملية غير صحيح (يجب أن يكون شراء أو نقل)',
-//           });
-//         }
-//       } else {
-//         delete orderData.requestType;
-//       }
-
-//       // ==================================================
-//       // 🚚 شرط النقل: سائق (طلب عميل + نقل فقط)
-//       // ==================================================
-//       if (
-//         orderData.orderSource === 'عميل' &&
-//         orderData.requestType === 'نقل' &&
-//         !orderData.driver
-//       ) {
-//         return res.status(400).json({
-//           error: 'طلبات النقل تتطلب تعيين سائق',
-//         });
-//       }
-
-//       // ==================================================
-//       // ⏰ التحقق من الأوقات
-//       // ==================================================
-//       if (
-//         !orderData.loadingDate ||
-//         !orderData.loadingTime ||
-//         !orderData.arrivalDate ||
-//         !orderData.arrivalTime
-//       ) {
-//         return res.status(400).json({ error: 'جميع الأوقات مطلوبة' });
-//       }
-
-//       const loadingDateTime = new Date(
-//         `${orderData.loadingDate}T${orderData.loadingTime}`
-//       );
-//       const arrivalDateTime = new Date(
-//         `${orderData.arrivalDate}T${orderData.arrivalTime}`
-//       );
-
-//       if (arrivalDateTime <= loadingDateTime) {
-//         return res.status(400).json({
-//           error: 'وقت الوصول يجب أن يكون بعد وقت التحميل',
-//         });
-//       }
-
-//       // ==================================================
-//       // 👤 بيانات المُنشئ
-//       // ==================================================
-//       orderData.createdBy = req.user._id;
-//       orderData.createdByName = req.user.name;
-
-//       // ==================================================
-//       // 👥 بيانات العميل (لو طلب عميل)
-//       // ==================================================
-//       if (orderData.orderSource === 'عميل') {
-//         const customerDoc = await Customer.findById(orderData.customer);
-//         if (!customerDoc) {
-//           return res.status(400).json({ error: 'العميل غير موجود' });
-//         }
-
-//         orderData.customerName = customerDoc.name;
-//         orderData.customerCode = customerDoc.code;
-//         orderData.customerPhone = customerDoc.phone;
-//         orderData.customerEmail = customerDoc.email;
-
-//         orderData.city = orderData.city || customerDoc.city;
-//         orderData.area = orderData.area || customerDoc.area;
-//         orderData.address = orderData.address ?? null;
-//       }
-
-//       // ==================================================
-//       // 🏢 بيانات المورد (لو طلب مورد)
-//       // ==================================================
-//       if (orderData.orderSource === 'مورد' && orderData.supplier) {
-//         const supplierDoc = await Supplier.findById(orderData.supplier);
-//         if (!supplierDoc) {
-//           return res.status(400).json({ error: 'المورد غير موجود' });
-//         }
-
-//         orderData.supplierName = supplierDoc.name;
-//         orderData.supplierCompany = supplierDoc.company;
-//         orderData.supplierContactPerson = supplierDoc.contactPerson;
-//         orderData.supplierPhone = supplierDoc.phone;
-
-//         orderData.city = orderData.city || supplierDoc.city;
-//         orderData.area = orderData.area || supplierDoc.area;
-//         orderData.address = orderData.address ?? null;
-//       }
-
-//       // ==================================================
-//       // 🛡️ تحقق نهائي للموقع
-//       // ==================================================
-//       if (!orderData.city || !orderData.area) {
-//         return res.status(400).json({
-//           error: 'المدينة والمنطقة مطلوبة لإنشاء الطلب',
-//           debug: {
-//             city: orderData.city,
-//             area: orderData.area,
-//           },
-//         });
-//       }
-
-//       // ==================================================
-//       // 📅 تحويل التواريخ
-//       // ==================================================
-//       orderData.orderDate = new Date(orderData.orderDate || new Date());
-//       orderData.loadingDate = new Date(orderData.loadingDate);
-//       orderData.arrivalDate = new Date(orderData.arrivalDate);
-
-//       // ==================================================
-//       // 📎 الملفات
-//       // ==================================================
-//       if (req.files?.attachments) {
-//         orderData.attachments = req.files.attachments.map((file) => ({
-//           filename: file.originalname,
-//           path: file.path,
-//           uploadedAt: new Date(),
-//           uploadedBy: req.user._id,
-//         }));
-//       }
-
-//       // ==================================================
-//       // 🧾 إنشاء الطلب
-//       // ==================================================
-//      const order = new Order(orderData);
-
-// try {
-//   await order.save();
-// } catch (error) {
-//   // 🔐 رقم طلب المورد مكرر
-//   if (
-//     error.code === 11000 &&
-//     (error.keyPattern?.supplierOrderNumber ||
-//      error.keyValue?.supplierOrderNumber)
-//   ) {
-//     return res.status(400).json({
-//       error: 'رقم طلب المورد مستخدم من قبل'
-//     });
-//   }
-
-//   console.error('❌ Error saving order:', error);
-//   return res.status(500).json({
-//     error: 'فشل في حفظ الطلب'
-//   });
-// }
-
-
-
-//       const populatedOrder = await Order.findById(order._id)
-//         .populate('customer', 'name code phone city area')
-//         .populate('supplier', 'name company city area')
-//         .populate('createdBy', 'name email')
-//         .populate('driver', 'name phone vehicleNumber');
-
-//       // ==================================================
-//       // 📧 إرسال إيميل عند إنشاء الطلب
-//       // ==================================================
-//       try {
-//         const emails = await getOrderEmails(order);
-
-//         if (emails && emails.length > 0) {
-//           await sendEmail({
-//             to: emails,
-//             subject:
-//               order.orderSource === 'عميل'
-//                 ? `🆕 تم إنشاء طلب عميل جديد (${order.orderNumber})`
-//                 : `🆕 تم إنشاء طلب مورد جديد (${order.orderNumber})`,
-//             html: `
-//               <div dir="rtl" style="font-family: Arial; padding:20px">
-//                 <h2>🆕 تم إنشاء طلب جديد</h2>
-//                 <p><strong>رقم الطلب:</strong> ${order.orderNumber}</p>
-//                 <p><strong>نوع الطلب:</strong> ${order.orderSource}</p>
-//                 <p><strong>المدينة:</strong> ${order.city} - ${order.area}</p>
-//                 <p><strong>تم الإنشاء بواسطة:</strong> ${req.user.name}</p>
-//               </div>
-//             `,
-//           });
-//         }
-//       } catch (emailError) {
-//         console.error(
-//           `❌ Failed to send order creation email for ${order.orderNumber}:`,
-//           emailError.message
-//         );
-//       }
-
-//       // ==================================================
-//       // ✅ الاستجابة
-//       // ==================================================
-//       return res.status(201).json({
-//         message:
-//           order.orderSource === 'عميل'
-//             ? 'تم إنشاء طلب العميل بنجاح'
-//             : 'تم إنشاء طلب المورد بنجاح',
-//         order: populatedOrder,
-//       });
-//     });
-//   } catch (error) {
-//     console.error('❌ Error creating order:', error);
-//     return res.status(500).json({ error: 'حدث خطأ في السيرفر' });
-//   }
-// };
-
-
 exports.createOrder = async (req, res) => {
   try {
     upload(req, res, async (err) => {
@@ -321,45 +79,22 @@ exports.createOrder = async (req, res) => {
       delete orderData.status;
       delete orderData.orderNumber;
 
-<<<<<<< HEAD
 
       orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
 
 
-=======
-      // ==================================================
-      // 🧭 تحديد مصدر الطلب
-      // ==================================================
-      orderData.orderSource = orderData.customer ? 'عميل' : 'مورد';
-
-      // ==================================================
-      // ⛔️ رقم طلب المورد مسموح لطلبات المورد فقط
-      // ==================================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (orderData.orderSource !== 'مورد') {
         delete orderData.supplierOrderNumber;
         delete orderData.supplier;
       }
 
-<<<<<<< HEAD
 
-=======
-      // ==================================================
-      // 👤 العميل مطلوب لطلبات العملاء
-      // ==================================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (orderData.orderSource === 'عميل' && !orderData.customer) {
         return res.status(400).json({
           error: 'العميل مطلوب لطلبات العملاء',
         });
       }
 
-<<<<<<< HEAD
-=======
-      // ==================================================
-      // ✅ نوع العملية (شراء | نقل) — للعملاء فقط
-      // ==================================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       const allowedRequestTypes = ['شراء', 'نقل'];
 
       if (orderData.orderSource === 'عميل') {
@@ -374,13 +109,7 @@ exports.createOrder = async (req, res) => {
         delete orderData.requestType;
       }
 
-<<<<<<< HEAD
  
-=======
-      // ==================================================
-      // 🚚 شرط النقل: سائق (طلب عميل + نقل فقط)
-      // ==================================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (
         orderData.orderSource === 'عميل' &&
         orderData.requestType === 'نقل' &&
@@ -433,12 +162,6 @@ exports.createOrder = async (req, res) => {
         orderData.address = orderData.address ?? null;
       }
 
-<<<<<<< HEAD
-=======
-      // ==================================================
-      // 🏢 بيانات المورد (لو طلب مورد)
-      // ==================================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (orderData.orderSource === 'مورد') {
         if (!orderData.supplier) {
           return res.status(400).json({ error: 'المورد مطلوب لطلبات المورد' });
@@ -489,11 +212,7 @@ exports.createOrder = async (req, res) => {
       try {
         await order.save();
       } catch (error) {
-<<<<<<< HEAD
 
-=======
-        // 🔐 رقم طلب المورد مكرر (index مركب)
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
         if (
           error.code === 11000 &&
           (
@@ -506,7 +225,6 @@ exports.createOrder = async (req, res) => {
             error: 'رقم طلب المورد مستخدم من قبل لهذا المورد'
           });
         }
-<<<<<<< HEAD
 
         console.error('❌ Error saving order:', error);
         return res.status(500).json({
@@ -1067,576 +785,7 @@ exports.createOrder = async (req, res) => {
 
       }
 
-=======
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
 
-        console.error('❌ Error saving order:', error);
-        return res.status(500).json({
-          error: 'فشل في حفظ الطلب'
-        });
-      }
-
-      const populatedOrder = await Order.findById(order._id)
-        .populate('customer', 'name code phone city area email')
-        .populate('supplier', 'name company city area email contactPerson phone')
-        .populate('createdBy', 'name email')
-        .populate('driver', 'name phone vehicleNumber');
-
-      // ==================================================
-      // 📧 إنشاء قالب البريد الإلكتروني المحسّن
-      // ==================================================
-      const createOrderCreationEmailTemplate = (order, user) => {
-        const formatDate = (date) => {
-          if (!date) return 'غير محدد';
-          return new Date(date).toLocaleDateString('ar-SA', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-          });
-        };
-
-        const formatTime = (time) => time || 'غير محدد';
-        
-        const formatCurrency = (amount) => {
-          if (!amount) return '0.00 ريال';
-          return amount.toLocaleString('ar-SA', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          }) + ' ريال';
-        };
-
-        const getOrderTypeIcon = () => {
-          if (order.orderSource === 'عميل') {
-            return order.requestType === 'نقل' ? '🚚' : '🛒';
-          }
-          return '🏭';
-        };
-
-        const getOrderTypeText = () => {
-          if (order.orderSource === 'عميل') {
-            return order.requestType === 'نقل' ? 'طلب نقل' : 'طلب شراء';
-          }
-          return 'طلب مورد';
-        };
-
-        return `
-          <!DOCTYPE html>
-          <html dir="rtl" lang="ar">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>${getOrderTypeIcon()} ${getOrderTypeText()} جديد - نظام إدارة الطلبات</title>
-              <style>
-                  * {
-                      margin: 0;
-                      padding: 0;
-                      box-sizing: border-box;
-                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                  }
-                  
-                  body {
-                      background-color: #f5f7fa;
-                      line-height: 1.6;
-                      color: #333;
-                  }
-                  
-                  .email-container {
-                      max-width: 700px;
-                      margin: 20px auto;
-                      background-color: #ffffff;
-                      border-radius: 12px;
-                      overflow: hidden;
-                      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-                  }
-                  
-                  .header {
-                      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-                      color: white;
-                      padding: 30px;
-                      text-align: center;
-                      border-bottom: 4px solid #ffcc00;
-                  }
-                  
-                  .company-logo {
-                      font-size: 24px;
-                      font-weight: bold;
-                      margin-bottom: 15px;
-                      color: #ffcc00;
-                  }
-                  
-                  .header h1 {
-                      font-size: 26px;
-                      margin-bottom: 10px;
-                      font-weight: 700;
-                  }
-                  
-                  .header .subtitle {
-                      font-size: 16px;
-                      opacity: 0.9;
-                      margin-top: 5px;
-                  }
-                  
-                  .order-number-badge {
-                      background: #4CAF50;
-                      color: white;
-                      padding: 10px 25px;
-                      border-radius: 25px;
-                      display: inline-block;
-                      margin-top: 15px;
-                      font-weight: bold;
-                      font-size: 18px;
-                      letter-spacing: 1px;
-                  }
-                  
-                  .content {
-                      padding: 30px;
-                  }
-                  
-                  .summary-card {
-                      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                      color: white;
-                      padding: 25px;
-                      border-radius: 10px;
-                      margin-bottom: 30px;
-                      text-align: center;
-                  }
-                  
-                  .summary-card h3 {
-                      font-size: 22px;
-                      margin-bottom: 10px;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      gap: 10px;
-                  }
-                  
-                  .summary-details {
-                      display: grid;
-                      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                      gap: 15px;
-                      margin-top: 20px;
-                  }
-                  
-                  .summary-item {
-                      background: rgba(255, 255, 255, 0.1);
-                      padding: 15px;
-                      border-radius: 8px;
-                      backdrop-filter: blur(10px);
-                  }
-                  
-                  .section {
-                      margin-bottom: 30px;
-                      padding: 20px;
-                      border-radius: 10px;
-                      background-color: #f8f9fa;
-                      border-left: 4px solid #2a5298;
-                  }
-                  
-                  .section-title {
-                      color: #2d3748;
-                      font-size: 18px;
-                      margin-bottom: 15px;
-                      padding-bottom: 10px;
-                      border-bottom: 2px solid #e2e8f0;
-                      font-weight: 600;
-                      display: flex;
-                      align-items: center;
-                      gap: 10px;
-                  }
-                  
-                  .info-grid {
-                      display: grid;
-                      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                      gap: 15px;
-                      margin-top: 15px;
-                  }
-                  
-                  .info-item {
-                      background: white;
-                      padding: 15px;
-                      border-radius: 8px;
-                      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-                  }
-                  
-                  .info-label {
-                      color: #718096;
-                      font-size: 13px;
-                      margin-bottom: 5px;
-                      font-weight: 500;
-                  }
-                  
-                  .info-value {
-                      color: #2d3748;
-                      font-size: 15px;
-                      font-weight: 600;
-                  }
-                  
-                  .timeline {
-                      position: relative;
-                      padding: 20px 0;
-                  }
-                  
-                  .timeline-item {
-                      position: relative;
-                      padding: 12px 0 12px 30px;
-                      margin-bottom: 15px;
-                      background: white;
-                      border-radius: 8px;
-                      padding: 15px 15px 15px 40px;
-                  }
-                  
-                  .timeline-item:before {
-                      content: '';
-                      position: absolute;
-                      left: 15px;
-                      top: 20px;
-                      width: 10px;
-                      height: 10px;
-                      border-radius: 50%;
-                      background: #2a5298;
-                  }
-                  
-                  .timeline-item:after {
-                      content: '';
-                      position: absolute;
-                      left: 19px;
-                      top: 20px;
-                      width: 2px;
-                      height: calc(100% + 15px);
-                      background: #e2e8f0;
-                  }
-                  
-                  .timeline-item:last-child:after {
-                      display: none;
-                  }
-                  
-                  .footer {
-                      background: #1a202c;
-                      color: white;
-                      padding: 25px;
-                      text-align: center;
-                      margin-top: 30px;
-                      border-top: 4px solid #ffcc00;
-                  }
-                  
-                  .footer p {
-                      margin: 10px 0;
-                      opacity: 0.8;
-                  }
-                  
-                  .footer-logo {
-                      font-size: 22px;
-                      font-weight: bold;
-                      color: #ffcc00;
-                      margin-bottom: 10px;
-                  }
-                  
-                  .status-badge {
-                      display: inline-block;
-                      padding: 4px 12px;
-                      border-radius: 20px;
-                      font-size: 12px;
-                      font-weight: 600;
-                  }
-                  
-                  .status-new {
-                      background: #d4edda;
-                      color: #155724;
-                  }
-                  
-                  .action-button {
-                      display: inline-block;
-                      background: #2a5298;
-                      color: white;
-                      padding: 12px 30px;
-                      border-radius: 25px;
-                      text-decoration: none;
-                      font-weight: 600;
-                      margin: 20px 0;
-                      transition: all 0.3s ease;
-                  }
-                  
-                  .action-button:hover {
-                      background: #1e3c72;
-                      transform: translateY(-2px);
-                      box-shadow: 0 4px 12px rgba(42, 82, 152, 0.3);
-                  }
-                  
-                  .contact-info {
-                      background: #f0f9ff;
-                      padding: 15px;
-                      border-radius: 8px;
-                      margin-top: 15px;
-                      border-right: 4px solid #2a5298;
-                  }
-                  
-                  @media (max-width: 600px) {
-                      .content {
-                          padding: 20px;
-                      }
-                      
-                      .header {
-                          padding: 20px 15px;
-                      }
-                      
-                      .header h1 {
-                          font-size: 20px;
-                      }
-                      
-                      .info-grid {
-                          grid-template-columns: 1fr;
-                      }
-                      
-                      .summary-details {
-                          grid-template-columns: 1fr;
-                      }
-                      
-                      .order-number-badge {
-                          font-size: 16px;
-                          padding: 8px 20px;
-                      }
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="email-container">
-                  <div class="header">
-                      <div class="company-logo">شركة البحيرة العربية</div>
-                      <h1>${getOrderTypeIcon()} ${getOrderTypeText()} جديد</h1>
-                      <p class="subtitle">نظام إدارة الطلبات - تأكيد إنشاء طلب</p>
-                      <div class="order-number-badge">${order.orderNumber}</div>
-                  </div>
-                  
-                  <div class="content">
-                      <div class="summary-card">
-                          <h3>${getOrderTypeIcon()} ملخص الطلب الجديد</h3>
-                          <div class="summary-details">
-                              <div class="summary-item">
-                                  <div class="info-label">نوع الطلب</div>
-                                  <div class="info-value">${getOrderTypeText()}</div>
-                              </div>
-                              <div class="summary-item">
-                                  <div class="info-label">تاريخ الإنشاء</div>
-                                  <div class="info-value">${formatDate(new Date())}</div>
-                              </div>
-                              <div class="summary-item">
-                                  <div class="info-label">الحالة</div>
-                                  <div class="info-value">
-                                      <span class="status-badge status-new">🆕 جديد</span>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                      
-                      <div class="section">
-                          <h2 class="section-title">👤 معلومات ${order.orderSource === 'عميل' ? 'العميل' : 'المورد'}</h2>
-                          <div class="info-grid">
-                              <div class="info-item">
-                                  <div class="info-label">${order.orderSource === 'عميل' ? 'اسم العميل' : 'اسم المورد'}</div>
-                                  <div class="info-value">${order.orderSource === 'عميل' ? order.customerName : order.supplierName}</div>
-                              </div>
-                              
-                              ${order.orderSource === 'عميل' ? `
-                              <div class="info-item">
-                                  <div class="info-label">كود العميل</div>
-                                  <div class="info-value">${order.customerCode || 'غير محدد'}</div>
-                              </div>
-                              ` : `
-                              <div class="info-item">
-                                  <div class="info-label">الشركة</div>
-                                  <div class="info-value">${order.supplierCompany || 'غير محدد'}</div>
-                              </div>
-                              `}
-                              
-                              <div class="info-item">
-                                  <div class="info-label">📞 الهاتف</div>
-                                  <div class="info-value">${order.orderSource === 'عميل' ? order.customerPhone : order.supplierPhone}</div>
-                              </div>
-                              
-                              ${order.orderSource === 'عميل' && order.customerEmail ? `
-                              <div class="info-item">
-                                  <div class="info-label">✉️ الإيميل</div>
-                                  <div class="info-value">${order.customerEmail}</div>
-                              </div>
-                              ` : ''}
-                              
-                              ${order.orderSource === 'مورد' && order.supplierContactPerson ? `
-                              <div class="info-item">
-                                  <div class="info-label">الشخص المسؤول</div>
-                                  <div class="info-value">${order.supplierContactPerson}</div>
-                              </div>
-                              ` : ''}
-                          </div>
-                      </div>
-                      
-                      <div class="section">
-                          <h2 class="section-title">📍 معلومات الموقع</h2>
-                          <div class="info-grid">
-                              <div class="info-item">
-                                  <div class="info-label">المدينة</div>
-                                  <div class="info-value">${order.city || 'غير محدد'}</div>
-                              </div>
-                              <div class="info-item">
-                                  <div class="info-label">المنطقة</div>
-                                  <div class="info-value">${order.area || 'غير محدد'}</div>
-                              </div>
-                              ${order.address ? `
-                              <div class="info-item">
-                                  <div class="info-label">العنوان التفصيلي</div>
-                                  <div class="info-value">${order.address}</div>
-                              </div>
-                              ` : ''}
-                          </div>
-                      </div>
-                      
-                      ${order.orderSource === 'عميل' && order.requestType ? `
-                      <div class="section">
-                          <h2 class="section-title">📦 معلومات الطلب</h2>
-                          <div class="info-grid">
-                              <div class="info-item">
-                                  <div class="info-label">نوع العملية</div>
-                                  <div class="info-value">${order.requestType}</div>
-                              </div>
-                              ${order.quantity ? `
-                              <div class="info-item">
-                                  <div class="info-label">الكمية</div>
-                                  <div class="info-value">${order.quantity} ${order.unit || 'لتر'}</div>
-                              </div>
-                              ` : ''}
-                              ${order.productType ? `
-                              <div class="info-item">
-                                  <div class="info-label">نوع المنتج</div>
-                                  <div class="info-value">${order.productType}</div>
-                              </div>
-                              ` : ''}
-                              ${order.fuelType ? `
-                              <div class="info-item">
-                                  <div class="info-label">نوع الوقود</div>
-                                  <div class="info-value">${order.fuelType}</div>
-                              </div>
-                              ` : ''}
-                          </div>
-                      </div>
-                      ` : ''}
-                      
-                      <div class="section">
-                          <h2 class="section-title">⏰ الجدول الزمني</h2>
-                          <div class="timeline">
-                              <div class="timeline-item">
-                                  <strong>وقت التحميل:</strong><br>
-                                  ${formatDate(order.loadingDate)} - ${order.loadingTime}
-                              </div>
-                              <div class="timeline-item">
-                                  <strong>وقت الوصول المتوقع:</strong><br>
-                                  ${formatDate(order.arrivalDate)} - ${order.arrivalTime}
-                              </div>
-                              <div class="timeline-item">
-                                  <strong>تم الإنشاء في:</strong><br>
-                                  ${formatDate(new Date())} - ${new Date().toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
-                              </div>
-                          </div>
-                      </div>
-                      
-                      <div class="section">
-                          <h2 class="section-title">👷 معلومات الإنشاء</h2>
-                          <div class="info-grid">
-                              <div class="info-item">
-                                  <div class="info-label">تم الإنشاء بواسطة</div>
-                                  <div class="info-value">${user.name}</div>
-                              </div>
-                              <div class="info-item">
-                                  <div class="info-label">📧 إيميل المنشئ</div>
-                                  <div class="info-value">${user.email}</div>
-                              </div>
-                              <div class="info-item">
-                                  <div class="info-label">تاريخ الإنشاء</div>
-                                  <div class="info-value">${formatDate(new Date())}</div>
-                              </div>
-                              <div class="info-item">
-                                  <div class="info-label">وقت الإنشاء</div>
-                                  <div class="info-value">${new Date().toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}</div>
-                              </div>
-                          </div>
-                      </div>
-                      
-                      ${order.notes ? `
-                      <div class="section">
-                          <h2 class="section-title">📝 ملاحظات إضافية</h2>
-                          <div class="contact-info">
-                              <p style="font-size: 14px; line-height: 1.6; color: #2c5282;">${order.notes}</p>
-                          </div>
-                      </div>
-                      ` : ''}
-                      
-                      <div style="text-align: center; margin: 30px 0;">
-                          <a href="#" class="action-button">👁️ عرض تفاصيل الطلب</a>
-                          <p style="color: #718096; font-size: 13px; margin-top: 15px;">
-                              يمكنك تتبع حالة الطلب عبر لوحة التحكم في النظام
-                          </p>
-                      </div>
-                      
-                      <div class="contact-info">
-                          <h4 style="color: #2a5298; margin-bottom: 10px;">📞 للاستفسار والدعم</h4>
-                          <p style="font-size: 14px; margin-bottom: 5px;">
-                              <strong>شركة البحيرة العربية</strong><br>
-                              نظام إدارة الطلبات المتكامل
-                          </p>
-                          <p style="font-size: 13px; color: #4a5568;">
-                              هذه رسالة تلقائية، يرجى عدم الرد عليها مباشرة
-                          </p>
-                      </div>
-                  </div>
-                  
-                  <div class="footer">
-                      <div class="footer-logo">شركة البحيرة العربية</div>
-                      <p>نظام إدارة الطلبات المتكامل</p>
-                      <p>© ${new Date().getFullYear()} جميع الحقوق محفوظة</p>
-                      <p style="font-size: 12px; opacity: 0.6; margin-top: 15px;">
-                          تم إرسال هذه الرسالة تلقائيًا من النظام، يرجى التواصل مع فريق الدعم لأي استفسار
-                      </p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `;
-      };
-
-      // ==================================================
-      // 📧 إرسال إيميل عند إنشاء الطلب مع معالجة الأخطاء
-      // ==================================================
-      try {
-        const emails = await getOrderEmails(order);
-
-        if (emails && emails.length > 0) {
-          // استخدام setTimeout لتجنب Timeout
-          const emailPromise = sendEmail({
-            to: emails,
-            subject:
-              order.orderSource === 'عميل'
-                ? `🆕 طلب عميل جديد تم إنشاؤه (${order.orderNumber}) - شركة البحيرة العربية`
-                : `🆕 طلب مورد جديد تم إنشاؤه (${order.orderNumber}) - شركة البحيرة العربية`,
-            html: createOrderCreationEmailTemplate(order, req.user),
-          });
-
-          // معالجة الأخطاء بشكل أفضل
-          emailPromise
-            .then(() => {
-              console.log(`✅ Email sent successfully for order ${order.orderNumber}`);
-            })
-            .catch((emailError) => {
-              console.warn(`⚠️ Email sending warning for ${order.orderNumber}:`, emailError.message);
-              // لا نوقف العملية إذا فشل البريد
-            });
-        }
-      } catch (emailError) {
-        console.warn(`⚠️ Email warning for ${order.orderNumber}:`, emailError.message);
-        // لا نوقف العملية الرئيسية بسبب فشل البريد
-      }
-
-      // ==================================================
-      // ✅ الاستجابة السريعة
-      // ==================================================
       return res.status(201).json({
         message:
           order.orderSource === 'عميل'
@@ -1655,26 +804,15 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
 
-=======
-// ============================================
-// 📋 جلب جميع الطلبات
-// ============================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
 
 exports.getOrders = async (req, res) => {
   try {
      const hasPagination = req.query.page || req.query.limit;
     const page = parseInt(req.query.page) || 1;
-<<<<<<< HEAD
     const limit = parseInt(req.query.limit) || 0; 
     const skip = limit ? (page - 1) * limit : 0;
 
-=======
-    const limit = parseInt(req.query.limit) || 0; // 0 = بدون limit
-    const skip = limit ? (page - 1) * limit : 0;
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
 
     const filter = {};
     
@@ -2199,6 +1337,7 @@ exports.getUpcomingOrders = async (req, res) => {
                 subject: `⏰ تذكير: اقتراب وصول الطلب ${order.orderNumber}`,
                 html: EmailTemplates.arrivalReminderTemplate(order, timeRemaining),
               });
+
             }
 
             // تحديث وقت الإرسال
@@ -2358,7 +1497,7 @@ exports.sendArrivalReminder = async (req, res) => {
     const usersToNotify = await User.find({
       $or: [
         { _id: order.createdBy?._id },
-        { role: { $in: ['admin', 'manager'] } }
+        { role: { $in: ['admin', 'owner'] } }
       ],
       isActive: true
     });
@@ -2482,12 +1621,8 @@ exports.updateOrder = async (req, res) => {
         'city', 'area', 'address',
         'loadingDate', 'loadingTime', 'arrivalDate', 'arrivalTime',
         'status', 'mergeStatus',
-<<<<<<< HEAD
         'requestType',
         'orderDate'
-=======
-        'requestType'
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       ];
 
       const forbiddenForSupplier = ['supplierOrderNumber', 'supplierName'];
@@ -2498,13 +1633,10 @@ exports.updateOrder = async (req, res) => {
           )
         : baseAllowedUpdates;
 
-<<<<<<< HEAD
       if (isSupplierOrder && 'requestType' in req.body) {
         delete req.body.requestType;
       }
 
-=======
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       // حماية إضافية
       forbiddenForSupplier.forEach((field) => delete req.body[field]);
 
@@ -2756,7 +1888,7 @@ exports.updateOrderStatus = async (req, res) => {
     // ============================================
     const user = req.user;
     
-    if (user.role !== 'admin' && user.role !== 'manager') {
+    if (user.role !== 'admin' && user.role !== 'owner ') {
       if (user.role === 'driver') {
         // السماح للسائق فقط بتغيير حالات معينة
         const allowedDriverStatuses = ['في الطريق', 'تم التسليم', 'تم التحميل'];
@@ -2954,7 +2086,7 @@ exports.updateOrderStatus = async (req, res) => {
         // مستخدمين للإشعار (المسؤولين + صاحب الطلب)
         const usersToNotify = await User.find({
           $or: [
-            { role: { $in: ['admin', 'manager'] } },
+            { role: { $in: ['admin', 'owner'] } },
             { _id: order.createdBy?._id }
           ],
           isActive: true
@@ -3540,19 +2672,8 @@ exports.updateOrderStatus = async (req, res) => {
 // };
 
 
-<<<<<<< HEAD
 
 
-=======
-
-// ============================================
-// 🔗 دمج الطلبات - محدثة مع بريد إلكتروني شامل
-// ============================================
-
-// ============================================
-// 🔗 دمج الطلبات - يصل البريد لجميع المستخدمين المسجلين
-// ============================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
 
 exports.mergeOrders = async (req, res) => {
   const session = await mongoose.startSession();
@@ -3903,11 +3024,12 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
     // 📧 جلب جميع المستخدمين المسجلين من نموذج User
     // =========================
     const User = mongoose.model('User');
-    const allUsers = await User.find({
-      email: { $exists: true, $ne: '' }
-    }).select('name email role company').lean();
+   const owners = await User.find({
+  role: 'owner',
+  email: { $exists: true, $ne: '' }
+}).select('name email role company').lean();
 
-    console.log(`📋 جاري إرسال بريد الدمج إلى ${allUsers.length} مستخدم مسجل`);
+console.log(`📋 جاري إرسال بريد الدمج إلى ${owners.length} Owner`);
 
     // =========================
     // 📧 إنشاء قالب البريد الإلكتروني الشامل
@@ -4381,7 +3503,8 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
                 <div class="content">
                     <div class="user-badge">
                         <h3></h3>
-                        <div class="user-count">${allUsers.length} مستخدم</div>
+                        <div class="user-count">${owners.length} Owner</div>
+
                         <p></p>
                     </div>
                     
@@ -4648,7 +3771,8 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
                 <div class="footer">
                     <div class="logo">شركة البحيرة العربية نظام ادارة الطلبات</div>
                     <p>تم إرسال هذه الرسالة تلقائيًا إلى جميع المستخدمين المسجلين في النظام</p>
-                    <p>📧 إجمالي المستلمين: <strong>${allUsers.length} مستخدم</strong></p>
+                   <p>📧 إجمالي المستلمين: <strong>${owners.length} Owner</strong></p>
+
                     <p>© ${new Date().getFullYear()} جميع الحقوق محفوظة</p>
                     <p style="font-size: 12px; opacity: 0.6; margin-top: 15px;">
                         هذا إشعار نظامي، يرجى عدم الرد على هذا البريد الإلكتروني
@@ -4664,52 +3788,37 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
     // 📧 إرسال البريد لجميع المستخدمين المسجلين
     // =========================
     let emailStats = {
-      totalUsers: allUsers.length,
+      totalUsers: owners.length,
       sent: 0,
       failed: 0,
       failedEmails: []
     };
 
     try {
-      if (allUsers.length > 0) {
+     if (owners.length > 0) {
+
         // تجميع جميع عناوين البريد
-        const allUserEmails = allUsers.map(user => user.email).filter(email => email && email.includes('@'));
+        const ownerEmails = owners
+  .map(user => user.email)
+  .filter(email => email && email.includes('@'));
+
         
-        if (allUserEmails.length > 0) {
-          const emailTemplate = createMergeEmailTemplate();
-          
-          // طريقة 1: إرسال بريد واحد إلى الجميع (BCC)
-          await sendEmail({
-            to: [], // لا نضع مستلم رئيسي
-            bcc: allUserEmails, // جميع المستخدمين كمستلمين مخفيين
-            subject: `📊 إشعار دمج طلبات: ${supplierOrder.orderNumber} ↔ ${customerOrder.orderNumber} (مرسل لـ ${allUserEmails.length} مستخدم)`,
-            html: emailTemplate
-          });
-          
-          emailStats.sent = allUserEmails.length;
-          console.log(`✅ تم إرسال بريد الدمج إلى ${allUserEmails.length} مستخدم`);
-          
-          // طريقة بديلة: إرسال لكل مستخدم بشكل منفصل (اختياري)
-          /*
-          const emailPromises = allUserEmails.map(email => 
-            sendEmail({
-              to: email,
-              subject: `📊 إشعار دمج طلبات: ${supplierOrder.orderNumber} ↔ ${customerOrder.orderNumber}`,
-              html: emailTemplate
-            }).catch(err => {
-              console.error(`❌ فشل إرسال إلى ${email}:`, err.message);
-              emailStats.failed++;
-              emailStats.failedEmails.push(email);
-              return null;
-            })
-          );
-          
-          await Promise.allSettled(emailPromises);
-          emailStats.sent = allUserEmails.length - emailStats.failed;
-          */
-        } else {
-          console.warn('⚠️ لم يتم العثور على عناوين بريد صالحة للمستخدمين');
-        }
+        if (ownerEmails.length > 0) {
+  const emailTemplate = createMergeEmailTemplate();
+
+  await sendEmail({
+    to: [], // بدون مستلم رئيسي
+    bcc: ownerEmails, // ⭐ Owners فقط
+    subject: `📊 إشعار دمج طلبات: ${supplierOrder.orderNumber} ↔ ${customerOrder.orderNumber}`,
+    html: emailTemplate
+  });
+
+  emailStats.sent = ownerEmails.length;
+  console.log(`✅ تم إرسال بريد الدمج إلى ${ownerEmails.length} Owner`);
+} else {
+  console.warn('⚠️ لا يوجد Owners لديهم بريد إلكتروني صالح');
+}
+
       }
 
       // إرسال بريد إضافي للمورد والعميل (إن وجد)
@@ -4769,7 +3878,8 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
 
     } catch (emailError) {
       console.error('❌ فشل إرسال بريد الدمج:', emailError.message);
-      emailStats.failed = allUsers.length;
+      emailStats.failed = owners.length;
+
     }
 
     // =========================
@@ -4783,7 +3893,7 @@ ${customerOrder.notes ? 'ملاحظات العميل: ' + customerOrder.notes : 
     // =========================
     return res.status(200).json({
       success: true,
-      message: `تم دمج الطلبات بنجاح وإرسال الإشعار إلى ${emailStats.sent} مستخدم`,
+      message: `تم دمج الطلبات بنجاح وإرسال الإشعار إلى ${emailStats.sent} Owner`,
       data: {
         mergedOrder: {
           _id: mergedOrder._id,
@@ -4859,7 +3969,7 @@ exports.deleteOrder = async (req, res) => {
     }
 
     // السماح فقط للإداريين بالحذف
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'owner') {
       return res.status(403).json({ error: 'غير مصرح بحذف الطلب' });
     }
 
@@ -5021,16 +4131,10 @@ exports.deleteAttachment = async (req, res) => {
 
 const { safeSendEmail } = require('../services/emailQueue');
 
-const { safeSendEmail } = require('../services/emailQueue');
-
 exports.checkArrivalNotifications = async () => {
   try {
     const now = new Date();
 
-<<<<<<< HEAD
-=======
-    // الطلبات التي لم يُرسل لها إشعار أو إيميل بعد
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
     const orders = await Order.find({
       status: { $in: ['جاهز للتحميل', 'في انتظار التحميل', 'مخصص للعميل', 'في الطريق'] },
       arrivalNotificationSentAt: { $exists: false },
@@ -5046,13 +4150,9 @@ exports.checkArrivalNotifications = async () => {
     const User = require('../models/User');
     const Notification = require('../models/Notification');
 
-<<<<<<< HEAD
 
-=======
-    // Admin + Manager مرة واحدة (تحسين أداء)
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
     const adminUsers = await User.find({
-      role: { $in: ['admin', 'manager'] },
+      role: { $in: ['admin', 'owner'] },
       isActive: true,
     });
 
@@ -5064,12 +4164,6 @@ exports.checkArrivalNotifications = async () => {
           continue;
         }
 
-<<<<<<< HEAD
-=======
-        // =========================
-        // 🔔 إنشاء Notification
-        // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
         if (adminUsers.length > 0) {
           const notification = new Notification({
             type: 'arrival_reminder',
@@ -5086,21 +4180,11 @@ exports.checkArrivalNotifications = async () => {
             recipients: adminUsers.map((user) => ({ user: user._id })),
             createdBy: order.createdBy?._id,
           });
-<<<<<<< HEAD
 
           await notification.save();
         }
 
 
-=======
-
-          await notification.save();
-        }
-
-        // =========================
-        // 📧 إرسال الإيميل (Rate Limited)
-        // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
         try {
           const arrivalDateTime = order.getFullArrivalDateTime();
           const timeRemainingMs = arrivalDateTime - now;
@@ -5126,13 +4210,7 @@ exports.checkArrivalNotifications = async () => {
           );
         }
 
-<<<<<<< HEAD
 
-=======
-        // =========================
-        // 💾 تحديث حالة الإرسال
-        // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
         order.arrivalNotificationSentAt = new Date();
         order.arrivalEmailSentAt = new Date();
         await order.save();
@@ -5153,16 +4231,6 @@ exports.checkArrivalNotifications = async () => {
 };
 
 
-<<<<<<< HEAD
-=======
-// ============================================
-// ✅ التحقق من اكتمال التحميل
-// ============================================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
-
-// ============================================
-// ✅ التحقق من اكتمال التنفيذ للطلبات المدمجة
-// ============================================
 
 exports.checkCompletedLoading = async () => {
   try {
@@ -5195,29 +4263,14 @@ exports.checkCompletedLoading = async () => {
 
     for (const order of orders) {
 
-<<<<<<< HEAD
-=======
-      // =========================
-      // 🛑 Guards مهمة
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (typeof order.getFullArrivalDateTime !== 'function') continue;
 
       const arrivalDateTime = order.getFullArrivalDateTime();
       if (!arrivalDateTime) continue;
 
-<<<<<<< HEAD
       if (now < arrivalDateTime) continue;
 
    
-=======
-      // لسه وقت الوصول مخلصش
-      if (now < arrivalDateTime) continue;
-
-      // =========================
-      // ✅ تنفيذ الطلب المدمج
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       const oldStatus = order.status;
 
       order.status = 'تم التنفيذ';
@@ -5231,12 +4284,6 @@ exports.checkCompletedLoading = async () => {
         `✅ Auto executed merged order ${order.orderNumber} from "${oldStatus}" to "تم التنفيذ"`
       );
 
-<<<<<<< HEAD
-=======
-      // =========================
-      // 🔗 تنفيذ الطلبات المرتبطة (عميل + مورد)
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       if (order.mergedWithOrderId) {
         const relatedOrders = await Order.find({
           _id: { $ne: order._id },
@@ -5272,15 +4319,9 @@ exports.checkCompletedLoading = async () => {
         }
       }
 
-<<<<<<< HEAD
    
-=======
-      // =========================
-      // 🔔 Notification
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       const adminUsers = await User.find({
-        role: { $in: ['admin', 'manager'] },
+        role: { $in: ['admin', 'owner'] },
         isActive: true
       });
 
@@ -5302,12 +4343,6 @@ exports.checkCompletedLoading = async () => {
         });
       }
 
-<<<<<<< HEAD
-=======
-      // =========================
-      // 📝 Activity للطلب المدمج
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       await Activity.create({
         orderId: order._id,
         activityType: 'تغيير حالة',
@@ -5319,12 +4354,6 @@ exports.checkCompletedLoading = async () => {
         }
       });
 
-<<<<<<< HEAD
-=======
-      // =========================
-      // 📧 Email (اختياري)
-      // =========================
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
       try {
         const emails = await getOrderEmails(order);
         if (emails && emails.length) {
@@ -5349,18 +4378,6 @@ exports.checkCompletedLoading = async () => {
   }
 };
 
-<<<<<<< HEAD
-=======
-
-
-
-// ============================================
-// 📊 إحصائيات الطلبات
-// ============================================
-
-
-
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
 
 
 

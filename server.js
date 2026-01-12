@@ -18,6 +18,13 @@ const supplierRoutes = require('./routes/supplierRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const maintenanceRoutes = require('./routes/maintenanceRoutes');
+const userRoutes = require('./routes/userRoutes');
+const fuelStationRoutes = require('./routes/fuelStationRoutes');
+const maintenanceRecordRoutes = require('./routes/maintenanceRecordRoutes');
+const technicianReportRoutes = require('./routes/technicianReportRoutes');
+const alertRoutes = require('./routes/alertRoutes');
+const approvalRequestRoutes = require('./routes/approvalRequestRoutes');
+const technicianLocationRoutes = require('./routes/technicianLocationRoutes');
 
 
 // Initialize Express app
@@ -48,6 +55,13 @@ app.use('/api/suppliers', supplierRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/fuel-stations', fuelStationRoutes);
+app.use('/api/maintenance-records', maintenanceRecordRoutes);
+app.use('/api/technician-reports', technicianReportRoutes);
+app.use('/api/alerts', alertRoutes);
+app.use('/api/approval-requests', approvalRequestRoutes);
+app.use('/api/technician-locations', technicianLocationRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

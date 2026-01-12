@@ -19,10 +19,20 @@ const userSchema = new mongoose.Schema({
     required: true
   },
   role: {
-  type: String,
-  enum: ['admin', 'employee', 'maintenance', 'viewer'],
-  default: 'employee'
-},
+    type: String,
+    enum: ['owner', 'admin', 'manager', 'supervisor', 'maintenance', 'employee', 'Maintenance_Technician' , 'viewer'],
+    default: 'employee',
+  },
+
+  isBlocked: {
+    type: Boolean,
+    default: false,
+  },
+
+  permissions: {
+    type: [String],
+    default: [],
+  },
 
   company: {
     type: String,

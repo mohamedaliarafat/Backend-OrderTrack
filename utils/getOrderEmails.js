@@ -1,43 +1,33 @@
 const User = require('../models/User');
 
 module.exports = async (order) => {
-  const emails = [];
+  try {
+    // 1️⃣ هات منشئ الطلب (عشان نحدد الحساب)
+    const creator = await User.findById(order.createdBy).select('companyId role email');
 
-  // 👤 إيميل العميل
-  if (order.customer?.email && typeof order.customer.email === 'string') {
-    emails.push(order.customer.email.trim());
-  }
-
-  // 👨‍💼 إيميل منشئ الطلب
-  if (order.createdBy?.email && typeof order.createdBy.email === 'string') {
-    emails.push(order.createdBy.email.trim());
-  }
-
-  // 🔐 Admin فقط (حسب الموديل الفعلي)
-  const admins = await User.find({
-    role: 'admin',
-    email: { $exists: true, $ne: null }
-  }).select('email');
-
-  admins.forEach(u => {
-    if (u.email && typeof u.email === 'string') {
-      emails.push(u.email.trim());
+    if (!creator) {
+      console.log('❌ Order creator not found');
+      return [];
     }
-  });
 
-  // 🧹 تنظيف نهائي + إزالة التكرار
-  const cleanEmails = [
-    ...new Set(
-      emails.filter(
-        e =>
-          typeof e === 'string' &&
-          e.includes('@') &&
-          e.includes('.')
-      )
-    )
-  ];
+    // 2️⃣ هات الـ Owner من نفس الحساب
+    const owner = await User.findOne({
+      role: 'owner',
+      companyId: creator.companyId // ✳️ غيّر الاسم لو مختلف عندك
+    }).select('email');
 
-  console.log('📨 Auto email recipients:', cleanEmails);
+    if (!owner || !owner.email) {
+      console.log('❌ Owner not found or has no email');
+      return [];
+    }
 
-  return cleanEmails;
+    const emails = [owner.email.trim()];
+
+    console.log('📨 Auto email recipients (OWNER ONLY):', emails);
+    return emails;
+
+  } catch (err) {
+    console.error('❌ getOrderEmails error:', err);
+    return [];
+  }
 };

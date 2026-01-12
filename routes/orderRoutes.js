@@ -32,17 +32,37 @@ const managerMiddleware = (req, res, next) => {
   next();
 };
 
+
+// صلاحيات دمج الطلبات
+const mergePermissionMiddleware = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'غير مصرح (لا يوجد مستخدم)' });
+  }
+
+  const allowedRoles = ['admin', 'owner', 'employee'];
+
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ error: 'غير مسموح بدمج الطلبات' });
+  }
+
+  next();
+};
+
 // جميع المسارات تتطلب مصادقة
 router.use(authMiddleware);
 
-<<<<<<< HEAD
 
 // ============================================
 // 🔗 مسارات الدمج
 // ============================================
 
 // دمج الطلبات (للإداريين والمديرين)
-router.post('/merge', managerMiddleware, orderController.mergeOrders);
+router.post(
+  '/merge',
+  mergePermissionMiddleware,
+  orderController.mergeOrders
+);
+
 
 // فك دمج الطلب
 router.post('/:id/unmerge', managerMiddleware, async (req, res) => {
@@ -137,81 +157,6 @@ router.delete('/:id', adminMiddleware, orderController.deleteOrder);
 
 // حذف مرفق عام
 router.delete('/:orderId/attachments/:attachmentId', orderController.deleteAttachment);
-// حذف مستند مورد
-router.delete('/:orderId/supplier-docs/:docId', orderController.deleteAttachment);
-
-// حذف مستند عميل
-router.delete('/:orderId/customer-docs/:docId', orderController.deleteAttachment);
-
-router.get('/reports/customers', reportController.customerReports);
-
-// تقارير السائقين
-router.get('/reports/drivers', reportController.driverReports);
-
-// تقارير الموردين
-router.get('/reports/suppliers', reportController.supplierReports);
-
-// تقارير المستخدمين
-router.get('/reports/users', reportController.userReports);
-
-// تقرير فاتورة محددة
-router.get('/reports/invoice/:orderId', reportController.invoiceReport);
-
-// تصدير PDF
-router.get('/reports/export/pdf', reportController.exportPDF);
-
-// تصدير Excel
-router.get('/reports/export/excel', reportController.exportExcel);
-
-// ============================================
-// 🔍 مسارات الفلاتر
-// ============================================
-
-// خيارات الفلاتر
-router.get('/filters/options', filterController.getFilterOptions);
-
-// بحث ذكي
-router.get('/filters/search', filterController.smartSearch);
-
-// إحصائيات الفلاتر
-router.post('/filters/stats', filterController.getFilterStats);
-=======
->>>>>>> 5503bbbd402f0b8d6a6b4a5fd0ef7236f0c28257
-
-
-
-
-
-
-// ============================================
-// 📋 مسارات الطلبات الأساسية
-// ============================================
-
-router.post('/', orderController.createOrder);
-router.get('/', orderController.getOrders);
-router.get('/:id', orderController.getOrder);
-
-// تحديث الطلب
-router.put(
-  '/:id',
-  upload.single('attachment'), // 👈 مهم جدًا
-  orderController.updateOrder
-);
-
-
-// تحديث حالة الطلب (للإداريين والمديرين فقط)
-router.patch('/:id/status', managerMiddleware, orderController.updateOrderStatus);
-
-// حذف الطلب (للإداريين فقط)
-router.delete('/:id', adminMiddleware, orderController.deleteOrder);
-
-// ============================================
-// 📎 مسارات المرفقات
-// ============================================
-
-// حذف مرفق عام
-router.delete('/:orderId/attachments/:attachmentId', orderController.deleteAttachment);
-
 // حذف مستند مورد
 router.delete('/:orderId/supplier-docs/:docId', orderController.deleteAttachment);
 

@@ -77,6 +77,7 @@ exports.register = async (req, res) => {
         email: user.email,
         role: user.role,
         company: user.company,
+        permissions: user.permissions || [],
       },
       token,
     });
@@ -96,6 +97,10 @@ exports.login = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({ error: 'User account is blocked' });
     }
 
     const isMatch = await user.comparePassword(password);
@@ -137,13 +142,14 @@ exports.login = async (req, res) => {
 
     return res.json({
       message: 'تم تسجيل الدخول بنجاح',
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        company: user.company,
-      },
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          company: user.company,
+          permissions: user.permissions || [],
+        },
       token,
     });
   } catch (error) {
@@ -158,15 +164,16 @@ exports.login = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     return res.json({
-      user: {
-        id: req.user._id,
-        name: req.user.name,
-        email: req.user.email,
-        role: req.user.role,
-        company: req.user.company,
-        phone: req.user.phone,
-        createdAt: req.user.createdAt,
-      },
+        user: {
+          id: req.user._id,
+          name: req.user.name,
+          email: req.user.email,
+          role: req.user.role,
+          company: req.user.company,
+          phone: req.user.phone,
+          createdAt: req.user.createdAt,
+          permissions: req.user.permissions || [],
+        },
     });
   } catch (error) {
     console.error('❌ Profile error:', error);
