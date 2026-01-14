@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['owner', 'admin', 'manager', 'supervisor', 'maintenance', 'employee', 'Maintenance_Technician' , 'viewer'],
+    enum: ['owner', 'admin', 'manager', 'supervisor', 'maintenance', 'employee', 'maintenance_technician' , 'viewer', 'station_boy'],
     default: 'employee',
   },
 
@@ -28,6 +28,15 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+
+  stationId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'Station',
+  required: function () {
+    return this.role === 'station_boy';
+  }
+},
+
 
   permissions: {
     type: [String],

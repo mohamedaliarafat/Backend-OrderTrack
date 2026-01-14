@@ -9,6 +9,7 @@ const ALLOWED_ROLES = [
   'maintenance',
   'employee',
   'viewer',
+  'station_boy',
 ];
 
 const PERMISSIONS = [
@@ -89,33 +90,72 @@ exports.listUsers = async (req, res) => {
 
 exports.createUser = async (req, res) => {
   try {
-    const { name, email, password, company, phone, role, permissions } = req.body;
+    const {
+      name,
+      email,
+      password,
+      company,
+      phone,
+      role,
+      permissions,
+      stationId, // 👈 مهم جدًا
+    } = req.body;
 
+    // =========================
+    // 1️⃣ التحقق من البيانات الأساسية
+    // =========================
     if (!name || !email || !password || !company) {
-      return res
-        .status(400)
-        .json({ success: false, error: 'Missing required fields' });
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+      });
     }
 
+    // =========================
+    // 2️⃣ منع تكرار البريد
+    // =========================
     const existing = await User.findOne({ email });
     if (existing) {
-      return res
-        .status(409)
-        .json({ success: false, error: 'Email already in use' });
+      return res.status(409).json({
+        success: false,
+        error: 'Email already in use',
+      });
     }
 
+    // =========================
+    // 3️⃣ تحديد الدور النهائي
+    // =========================
+    const finalRole = normalizeRole(role);
+
+    // =========================
+    // 4️⃣ التحقق من ربط عامل المحطة بمحطة
+    // =========================
+    if (finalRole === 'station_boy' && !stationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Station is required for station boy',
+      });
+    }
+
+    // =========================
+    // 5️⃣ إنشاء المستخدم
+    // =========================
     const user = new User({
       name,
       email,
       password,
       company,
       phone,
-      role: normalizeRole(role),
+      role: finalRole,
       permissions: normalizePermissions(permissions),
+      stationId: finalRole === 'station_boy' ? stationId : null,
     });
 
     await user.save();
 
+    // =========================
+    // 6️⃣ الاستجابة
+    // =========================
     res.status(201).json({
       success: true,
       user: {
@@ -125,6 +165,7 @@ exports.createUser = async (req, res) => {
         role: user.role,
         company: user.company,
         phone: user.phone,
+        stationId: user.stationId || null,
         isBlocked: user.isBlocked,
         createdAt: user.createdAt,
         permissions: user.permissions,
@@ -132,7 +173,10 @@ exports.createUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Create user error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create user' });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create user',
+    });
   }
 };
 

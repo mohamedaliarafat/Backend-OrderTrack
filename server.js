@@ -25,6 +25,7 @@ const technicianReportRoutes = require('./routes/technicianReportRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const approvalRequestRoutes = require('./routes/approvalRequestRoutes');
 const technicianLocationRoutes = require('./routes/technicianLocationRoutes');
+const stationRoutes = require('./routes/stationRoutes');
 
 
 // Initialize Express app
@@ -62,6 +63,7 @@ app.use('/api/technician-reports', technicianReportRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/approval-requests', approvalRequestRoutes);
 app.use('/api/technician-locations', technicianLocationRoutes);
+app.use('/api/stations', stationRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

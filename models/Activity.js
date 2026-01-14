@@ -16,7 +16,8 @@ const activitySchema = new mongoose.Schema({
       'تغيير حالة',
       'إضافة ملاحظة',
       'رفع ملف',
-      'دمج' // ✅ أضفناها
+      'دمج',
+      "إغلاق" // ✅ أضفناها
     ],
     required: true
   },
