@@ -4,14 +4,13 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 
-// Load environment variables
 dotenv.config();
 
-// Import routes
+// Routes
 const authRoutes = require('./routes/authRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const activityRoutes = require('./routes/activityRoutes');
-const customerRoutes = require('./routes/customerRoutes'); 
+const customerRoutes = require('./routes/customerRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const driverRoutes = require('./routes/driverRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
@@ -27,29 +26,65 @@ const approvalRequestRoutes = require('./routes/approvalRequestRoutes');
 const technicianLocationRoutes = require('./routes/technicianLocationRoutes');
 const stationRoutes = require('./routes/stationRoutes');
 
-
-// Initialize Express app
 const app = express();
 
-// Middleware
-app.use(cors());
+/* ===============================
+   🔐 TRUST PROXY (NGINX + HTTPS)
+================================ */
+app.set('trust proxy', 1);
+
+/* ===============================
+   🌍 CORS CONFIG (IMPORTANT)
+================================ */
+const allowedOrigins = [
+  'https://albuhairaalarabia.com',
+  'https://www.albuhairaalarabia.com'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow Postman / server calls
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Preflight
+app.options('*', cors());
+
+/* ===============================
+   🧩 MIDDLEWARES
+================================ */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URL || 'mongodb+srv://nasser66:Qwert1557@cluster0.odv4fdk.mongodb.net/', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+/* ===============================
+   🗄️ DATABASE
+================================ */
+mongoose.connect(
+  process.env.MONGODB_URL ||
+  'mongodb+srv://nasser66:Qwert1557@cluster0.odv4fdk.mongodb.net/',
+  {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  }
+)
 .then(() => console.log('✅ MongoDB Connected Successfully'))
 .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
-// Routes
+/* ===============================
+   🚏 ROUTES
+================================ */
 app.use('/api/auth', authRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/activities', activityRoutes);
-app.use('/api/customers', customerRoutes); 
+app.use('/api/customers', customerRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/drivers', driverRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -65,18 +100,27 @@ app.use('/api/approval-requests', approvalRequestRoutes);
 app.use('/api/technician-locations', technicianLocationRoutes);
 app.use('/api/stations', stationRoutes);
 
-// Root endpoint
+/* ===============================
+   🏠 ROOT
+================================ */
 app.get('/', (req, res) => {
-  res.json({ message: 'Fuel Supply Tracking System API' });
+  res.json({ status: 'OK', message: 'Fuel Supply Tracking System API' });
 });
 
-// Error handling middleware
+/* ===============================
+   ❌ ERROR HANDLER
+================================ */
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  console.error(err.message);
+  res.status(500).json({
+    success: false,
+    message: err.message || 'Internal Server Error'
+  });
 });
 
-// Start server
+/* ===============================
+   🚀 START SERVER
+================================ */
 const PORT = process.env.PORT || 6030;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
