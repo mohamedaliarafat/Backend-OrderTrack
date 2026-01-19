@@ -24,15 +24,29 @@ const generateSessionNumber = async (stationCode) => {
 // Open new session
 exports.openSession = async (req, res) => {
   try {
-    // 🔹 انسخ البيانات بدل استخدام req.body مباشرة
     const sessionData = { ...req.body };
 
-    // 🔥 تنظيف القيم المسببة للأخطاء
-    if (!sessionData._id) delete sessionData._id;
-    if (sessionData.differenceReason == null) delete sessionData.differenceReason;
+    // =========================
+    // 🧹 تنظيف _id
+    // =========================
+    if (!sessionData._id) {
+      delete sessionData._id;
+    }
 
     // =========================
-    // Get station info
+    // ✅ تحقق من قراءات الليّات
+    // =========================
+    if (
+      !Array.isArray(sessionData.nozzleReadings) ||
+      sessionData.nozzleReadings.length === 0
+    ) {
+      return res.status(400).json({
+        error: 'يجب إدخال قراءات الليّات',
+      });
+    }
+
+    // =========================
+    // 📍 جلب المحطة
     // =========================
     const station = await Station.findById(sessionData.stationId);
     if (!station) {
@@ -40,84 +54,119 @@ exports.openSession = async (req, res) => {
     }
 
     // =========================
-    // Get pump info
+    // 🔢 رقم الجلسة
     // =========================
-    const pump = station.pumps.id(sessionData.pumpId);
-    if (!pump) {
-      return res.status(404).json({ error: 'الطلمبة غير موجودة' });
-    }
-
-    // =========================
-    // Generate session number
-    // =========================
-    sessionData.sessionNumber = await generateSessionNumber(station.stationCode);
-
-    // =========================
-    // Set additional data
-    // =========================
-    sessionData.stationName = station.stationName;
-    sessionData.pumpNumber = pump.pumpNumber;
-    sessionData.fuelType = pump.fuelType;
-    sessionData.openingEmployeeId = req.user._id;
-    sessionData.openingEmployeeName = req.user.name;
-    sessionData.openingTime = new Date();
-    sessionData.sessionDate = new Date();
-
-    // =========================
-    // Get current fuel price (safe)
-    // =========================
-    const fuelPrice = station.fuelPrices?.find(
-      p => p.fuelType === pump.fuelType
+    sessionData.sessionNumber = await generateSessionNumber(
+      station.stationCode
     );
 
-    if (fuelPrice) {
-      sessionData.unitPrice = fuelPrice.price;
-    }
+    sessionData.stationName = station.stationName;
+    sessionData.sessionDate = new Date();
+    sessionData.openingEmployeeId = req.user._id;
+    sessionData.openingEmployeeName = req.user.name;
 
     // =========================
-    // Create & save session
+    // 🧠 التحقق وبناء nozzleReadings
+    // =========================
+    const finalNozzleReadings = [];
+
+    for (const nr of sessionData.nozzleReadings) {
+      if (!nr.pumpId) {
+        return res.status(400).json({ error: 'يوجد قراءة بدون pumpId' });
+      }
+
+      if (nr.nozzleNumber == null) {
+        return res.status(400).json({ error: 'يوجد قراءة بدون رقم الليّة' });
+      }
+
+      if (!nr.fuelType) {
+        return res.status(400).json({ error: 'يوجد قراءة بدون نوع الوقود' });
+      }
+
+      if (nr.openingReading == null) {
+        return res.status(400).json({ error: 'يوجد قراءة بدون قيمة فتح' });
+      }
+
+      const pump = station.pumps.id(nr.pumpId);
+      if (!pump) {
+        return res.status(400).json({
+          error: `الطلمبة غير موجودة (${nr.pumpId})`,
+        });
+      }
+
+      // ✅ FIX: توحيد النوع
+      const nozzle = pump.nozzles.find(
+        (n) => Number(n.nozzleNumber) === Number(nr.nozzleNumber)
+      );
+
+      if (!nozzle) {
+        return res.status(400).json({
+          error: `الليّة ${nr.nozzleNumber} غير موجودة في الطلمبة ${pump.pumpNumber}`,
+        });
+      }
+
+      const fuelPrice = station.fuelPrices?.find(
+        (p) => p.fuelType === nr.fuelType
+      );
+
+      finalNozzleReadings.push({
+        pumpId: pump._id,
+        pumpNumber: pump.pumpNumber,
+
+        nozzleNumber: nozzle.nozzleNumber,
+        side: nozzle.side, // ✅ من الداتا الأصلية
+        fuelType: nr.fuelType,
+
+        openingReading: nr.openingReading,
+        openingImageUrl: nr.imageUrl || nr.attachmentPath,
+        openingTime: new Date(),
+
+        unitPrice: fuelPrice?.price || 0,
+      });
+    }
+
+    sessionData.nozzleReadings = finalNozzleReadings;
+
+    // =========================
+    // 💾 حفظ الجلسة
     // =========================
     const session = new PumpSession(sessionData);
     await session.save();
 
     // =========================
-    // Log activity
+    // 📝 Activity
     // =========================
-    const activity = new Activity({
+    await Activity.create({
       sessionId: session._id,
       activityType: 'إنشاء',
-      description: `تم فتح جلسة جديدة ${session.sessionNumber} للطلمبة ${pump.pumpNumber}`,
+      description: `تم فتح جلسة ${session.sessionNumber}`,
       performedBy: req.user._id,
       performedByName: req.user.name,
       changes: {
         'رقم الجلسة': session.sessionNumber,
-        'الطلمبة': pump.pumpNumber,
-        'قراءة الفتح': session.openingReading.toString()
-      }
+        'عدد الليّات': session.nozzleReadings.length.toString(),
+      },
     });
 
-    await activity.save();
-
-    // =========================
-    // Response
-    // =========================
     res.status(201).json({
       message: 'تم فتح الجلسة بنجاح',
-      session
+      session,
     });
-
   } catch (error) {
-    console.error(error);
+    console.error('❌ openSession error:', error);
     res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
+
+
 
 
 // Close session
 exports.closeSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const closingData = { ...req.body }; // ✅ نسخ بدل استخدام مباشر
+    const closingData = { ...req.body };
 
     const session = await PumpSession.findById(sessionId);
     if (!session) {
@@ -128,59 +177,97 @@ exports.closeSession = async (req, res) => {
       return res.status(400).json({ error: 'الجلسة ليست مفتوحة' });
     }
 
-    // ✅ تحقق بسيط من قراءة الإغلاق
-    if (closingData.closingReading == null) {
-      return res.status(400).json({ error: 'قراءة الإغلاق مطلوبة' });
-    }
-
-    // Set closing data
+    /* =========================
+       🧾 بيانات الإغلاق الأساسية
+    ========================= */
     session.closingEmployeeId = req.user._id;
     session.closingEmployeeName = req.user.name;
-    session.closingReading = closingData.closingReading;
     session.closingTime = new Date();
 
-    session.paymentTypes = closingData.paymentTypes || session.paymentTypes;
-    session.fuelSupply = closingData.fuelSupply;
-    session.carriedForwardBalance = closingData.carriedForwardBalance || 0;
-    session.actualDifference = closingData.actualDifference;
-
-    // 🔥 الحل الأساسي: لا تحفظ null في enum
-    if (closingData.differenceReason != null && closingData.differenceReason !== '') {
-      session.differenceReason = closingData.differenceReason;
-    } else {
-      session.differenceReason = undefined; // ✅ يشيلها بدل null
+    /* =========================
+       💰 التحصيل (إجباري)
+    ========================= */
+    if (
+      !closingData.paymentTypes ||
+      typeof closingData.paymentTypes !== 'object'
+    ) {
+      return res.status(400).json({
+        error: 'بيانات التحصيل مطلوبة',
+      });
     }
 
-    session.notes = closingData.notes;
+    session.paymentTypes = closingData.paymentTypes;
+
+    /* =========================
+       💸 المصروفات (اختياري)
+    ========================= */
+    if (Array.isArray(closingData.expenses)) {
+      session.expenses = closingData.expenses;
+    }
+    // لو مش موجودة → تفضل زي ما هي (أو فاضية)
+
+    /* =========================
+       ⛽ التوريد (اختياري)
+    ========================= */
+    if (closingData.fuelSupply) {
+      session.fuelSupply = closingData.fuelSupply;
+    }
+
+    /* =========================
+       📝 ملاحظات / سبب فرق (اختياري)
+    ========================= */
+    if (
+      closingData.differenceReason &&
+      closingData.differenceReason !== ''
+    ) {
+      session.differenceReason = closingData.differenceReason;
+    } else {
+      session.differenceReason = undefined;
+    }
+
+    session.notes = closingData.notes || undefined;
+
+    /* =========================
+       🔒 إغلاق الجلسة
+    ========================= */
     session.status = 'مغلقة';
+    await session.save(); // 🔥 هنا الحساب كله يتم تلقائيًا (hook)
 
-    await session.save();
+    /* =========================
+       📝 Activity
+    ========================= */
+    const changes = {
+      الحالة: 'مغلقة',
+      'إجمالي التحصيل': session.totalSales.toString(),
+      'صافي المبيعات': session.netSales.toString(),
+      'إجمالي المصروفات': session.expensesTotal.toString(),
+      'فرق الجلسة': session.calculatedDifference.toString(),
+    };
 
-    // Log activity
-    const activity = new Activity({
+    if (session.expenses?.length) {
+      changes['عدد المصروفات'] = session.expenses.length.toString();
+    }
+
+    await Activity.create({
       sessionId: session._id,
       activityType: 'إغلاق',
       description: `تم إغلاق الجلسة ${session.sessionNumber}`,
       performedBy: req.user._id,
       performedByName: req.user.name,
-      changes: {
-        'قراءة الإغلاق': session.closingReading.toString(),
-        'إجمالي المبيعات': session.totalSales?.toString() || '0',
-        'الحالة': 'مغلقة'
-      }
+      changes,
     });
-
-    await activity.save();
 
     res.json({
+      success: true,
       message: 'تم إغلاق الجلسة بنجاح',
-      session
+      session,
     });
   } catch (error) {
-    console.error(error);
+    console.error('❌ closeSession error:', error);
     res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };
+
 
 
 // Approve opening reading

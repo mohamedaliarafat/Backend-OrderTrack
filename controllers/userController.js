@@ -98,7 +98,7 @@ exports.createUser = async (req, res) => {
       phone,
       role,
       permissions,
-      stationId, // 👈 مهم جدًا
+      stationId,
     } = req.body;
 
     // =========================
@@ -123,31 +123,44 @@ exports.createUser = async (req, res) => {
     }
 
     // =========================
-    // 3️⃣ تحديد الدور النهائي
+    // 3️⃣ تحديد الدور النهائي (موحّد)
     // =========================
     const finalRole = normalizeRole(role);
 
     // =========================
     // 4️⃣ التحقق من ربط عامل المحطة بمحطة
     // =========================
-    if (finalRole === 'station_boy' && !stationId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Station is required for station boy',
-      });
+    if (finalRole === 'station_boy') {
+      if (!stationId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Station is required for station boy',
+        });
+      }
+
+      // (اختياري لكن مهم) التأكد أن المحطة موجودة
+      const stationExists = await Station.exists({ _id: stationId });
+      if (!stationExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid station',
+        });
+      }
     }
 
     // =========================
     // 5️⃣ إنشاء المستخدم
     // =========================
     const user = new User({
-      name,
-      email,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
       password,
-      company,
-      phone,
+      company: company.trim(),
+      phone: phone?.trim() || null,
       role: finalRole,
       permissions: normalizePermissions(permissions),
+
+      // ✅ ربط المحطة فقط لعامل محطة
       stationId: finalRole === 'station_boy' ? stationId : null,
     });
 
@@ -165,7 +178,7 @@ exports.createUser = async (req, res) => {
         role: user.role,
         company: user.company,
         phone: user.phone,
-        stationId: user.stationId || null,
+        stationId: user.stationId, // null لو مش station_boy
         isBlocked: user.isBlocked,
         createdAt: user.createdAt,
         permissions: user.permissions,
@@ -180,46 +193,109 @@ exports.createUser = async (req, res) => {
   }
 };
 
+
 exports.updateUser = async (req, res) => {
   try {
     const userId = req.params.id;
-    const { name, email, company, phone, role, password, permissions } =
-      req.body;
+
+    const {
+      name,
+      email,
+      company,
+      phone,
+      role,
+      password,
+      permissions,
+      stationId,
+    } = req.body;
+
     const updates = {};
 
-    if (name) updates.name = name;
-    if (email) updates.email = email;
-    if (company) updates.company = company;
+    // =========================
+    // 1️⃣ تحديث الحقول العادية
+    // =========================
+    if (name !== undefined) updates.name = name;
+    if (email !== undefined) updates.email = email;
+    if (company !== undefined) updates.company = company;
     if (phone !== undefined) updates.phone = phone;
-    if (role) updates.role = normalizeRole(role);
+
+    // =========================
+    // 2️⃣ الدور
+    // =========================
+    let finalRole;
+    if (role !== undefined) {
+      finalRole = normalizeRole(role);
+      updates.role = finalRole;
+    }
+
+    // =========================
+    // 3️⃣ كلمة المرور
+    // =========================
     if (password) {
       const salt = await bcrypt.genSalt(10);
       updates.password = await bcrypt.hash(password, salt);
     }
 
+    // =========================
+    // 4️⃣ الصلاحيات
+    // =========================
     if (permissions !== undefined) {
       updates.permissions = normalizePermissions(permissions);
     }
 
-    const user = await User.findByIdAndUpdate(userId, updates, {
-      new: true,
-      runValidators: true,
-    }).select(
-      'name email role company phone createdAt isBlocked permissions'
-    );
-
+    // =========================
+    // 5️⃣ جلب المستخدم الحالي
+    // =========================
+    const user = await User.findById(userId);
     if (!user) {
       return res
         .status(404)
         .json({ success: false, error: 'User not found' });
     }
 
-    res.json({ success: true, user });
+    const effectiveRole = finalRole || user.role;
+
+    // =========================
+    // 6️⃣ منطق ربط المحطة
+    // =========================
+    if (effectiveRole === 'station_boy') {
+      if (!stationId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Station is required for station boy',
+        });
+      }
+
+      updates.stationId = stationId;
+    } else {
+      // ❌ أي دور غير عامل محطة
+      updates.stationId = null;
+    }
+
+    // =========================
+    // 7️⃣ التحديث
+    // =========================
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      updates,
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).select(
+      'name email role company phone stationId createdAt isBlocked permissions'
+    );
+
+    res.json({ success: true, user: updatedUser });
   } catch (error) {
     console.error('Update user error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update user' });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update user',
+    });
   }
 };
+
 
 exports.deleteUser = async (req, res) => {
   try {

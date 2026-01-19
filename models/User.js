@@ -32,9 +32,7 @@ const userSchema = new mongoose.Schema({
   stationId: {
   type: mongoose.Schema.Types.ObjectId,
   ref: 'Station',
-  required: function () {
-    return this.role === 'station_boy';
-  }
+  default: null,
 },
 
 

@@ -236,16 +236,34 @@ exports.addPump = async (req, res) => {
       return res.status(404).json({ error: 'المحطة غير موجودة' });
     }
 
-    // Check if pump number already exists
-    const existingPump = station.pumps.find(p => p.pumpNumber === pumpData.pumpNumber);
+    // ✅ تأكيد رقم الطلمبة
+    if (!pumpData.pumpNumber) {
+      return res.status(400).json({ error: 'رقم الطلمبة مطلوب' });
+    }
+
+    // ✅ منع التكرار
+    const existingPump = station.pumps.find(
+      p => p.pumpNumber === pumpData.pumpNumber
+    );
     if (existingPump) {
       return res.status(400).json({ error: 'رقم الطلمبة موجود بالفعل' });
     }
 
+    // ✅ تأكيد وجود الليّات
+    if (!Array.isArray(pumpData.nozzles) || pumpData.nozzles.length === 0) {
+      return res.status(400).json({ error: 'يجب إضافة لِيّة واحدة على الأقل' });
+    }
+
+    // ✅ إضافة الطلمبة
     station.pumps.push(pumpData);
     await station.save();
 
-    // Log activity
+    // 🔹 الحصول على الطلمبة بعد الحفظ (مع _id)
+    const addedPump = station.pumps.find(
+      p => p.pumpNumber === pumpData.pumpNumber
+    );
+
+    // 📝 تسجيل النشاط
     const activity = new Activity({
       stationId: station._id,
       activityType: 'إضافة',
@@ -254,20 +272,29 @@ exports.addPump = async (req, res) => {
       performedByName: req.user.name,
       changes: {
         'رقم الطلمبة': pumpData.pumpNumber,
-        'نوع الوقود': pumpData.fuelType,
-        'عدد الفتحات': pumpData.nozzleCount.toString()
+        'عدد الليّات': pumpData.nozzles.length.toString(),
+        'أنواع الوقود': pumpData.nozzles.map(n => n.fuelType).join(' ، ')
       }
     });
     await activity.save();
 
+    // ✅ رد نهائي
     res.status(201).json({
+      success: true,
       message: 'تم إضافة الطلمبة بنجاح',
-      station
+      pump: addedPump   // ⭐ مهم جدًا
     });
+
   } catch (error) {
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error('❌ addPump error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'حدث خطأ في السيرفر'
+    });
   }
 };
+
+
 
 // Update pump
 exports.updatePump = async (req, res) => {

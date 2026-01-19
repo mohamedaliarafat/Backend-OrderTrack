@@ -1,10 +1,13 @@
 const mongoose = require('mongoose');
+const expenseSchema = require('./Expense');
+
 
 /* =========================
-   Pump Reading SubSchema
+   🔹 Nozzle Reading Schema
 ========================= */
-const pumpReadingSchema = new mongoose.Schema(
+const nozzleReadingSchema = new mongoose.Schema(
   {
+    // 🔗 الربط بالطلمبة
     pumpId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
@@ -15,49 +18,55 @@ const pumpReadingSchema = new mongoose.Schema(
       required: true,
     },
 
+    // 🔢 بيانات الليّة
+    nozzleNumber: {
+      type: Number,
+      required: true,
+    },
+
+    side: {
+      type: String,
+      enum: ['right', 'left'],
+      required: true,
+    },
+
     fuelType: {
       type: String,
       enum: ['بنزين 91', 'بنزين 95', 'ديزل', 'كيروسين'],
       required: true,
     },
 
-    // =========================
-    // Opening
-    // =========================
+    /* =========================
+       Opening
+    ========================= */
     openingReading: {
       type: Number,
       required: true,
       min: 0,
     },
 
-    openingImageUrl: {
-      type: String, // 🔗 Firebase Storage URL
-    },
+    openingImageUrl: String,
 
     openingTime: {
       type: Date,
       default: Date.now,
     },
 
-    // =========================
-    // Closing
-    // =========================
+    /* =========================
+       Closing
+    ========================= */
     closingReading: {
       type: Number,
       min: 0,
     },
 
-    closingImageUrl: {
-      type: String, // 🔗 Firebase Storage URL
-    },
+    closingImageUrl: String,
 
-    closingTime: {
-      type: Date,
-    },
+    closingTime: Date,
 
-    // =========================
-    // Calculations per pump
-    // =========================
+    /* =========================
+       Calculations (per nozzle)
+    ========================= */
     totalLiters: {
       type: Number,
       default: 0,
@@ -86,7 +95,7 @@ const pumpReadingSchema = new mongoose.Schema(
 );
 
 /* =========================
-   Pump Session Schema
+   🔹 Pump Session Schema
 ========================= */
 const pumpSessionSchema = new mongoose.Schema(
   {
@@ -117,20 +126,36 @@ const pumpSessionSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    expenses: {
+  type: [expenseSchema],
+  default: [],
+},
 
-    // ⭐ كل الطلمبات هنا
-    pumps: {
-      type: [pumpReadingSchema],
+expensesTotal: {
+  type: Number,
+  default: 0,
+  min: 0,
+},
+
+netSales: {
+  type: Number,
+  default: 0,
+},
+
+
+    /* ⭐⭐ كل القراءات هنا (لكل لِيّة) ⭐⭐ */
+    nozzleReadings: {
+      type: [nozzleReadingSchema],
       required: true,
       validate: [
         (v) => Array.isArray(v) && v.length > 0,
-        'يجب إدخال قراءات الطلمبات',
+        'يجب إدخال قراءات الليّات',
       ],
     },
 
-    // =========================
-    // Opening Info
-    // =========================
+    /* =========================
+       Opening Info
+    ========================= */
     openingEmployeeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -150,9 +175,9 @@ const pumpSessionSchema = new mongoose.Schema(
 
     openingApprovedAt: Date,
 
-    // =========================
-    // Closing Info
-    // =========================
+    /* =========================
+       Closing Info
+    ========================= */
     closingEmployeeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -172,9 +197,9 @@ const pumpSessionSchema = new mongoose.Schema(
 
     closingApprovedAt: Date,
 
-    // =========================
-    // Totals (Session Level)
-    // =========================
+    /* =========================
+       Totals (Session Level)
+    ========================= */
     totalLiters: {
       type: Number,
       default: 0,
@@ -214,51 +239,64 @@ const pumpSessionSchema = new mongoose.Schema(
     notes: String,
   },
   {
-    timestamps: true, // createdAt / updatedAt
+    timestamps: true,
   }
 );
 
 /* =========================
-   Hooks
+   🔁 Hooks (الحسابات)
 ========================= */
 pumpSessionSchema.pre('save', function (next) {
   let totalLiters = 0;
   let totalAmount = 0;
+  let expensesTotal = 0;
 
-  // 🔢 حساب كل طلمبة
-  this.pumps.forEach((pump) => {
+  // ✅ حساب الوقود (لكل لِيّة)
+  this.nozzleReadings.forEach((nozzle) => {
     if (
-      typeof pump.openingReading === 'number' &&
-      typeof pump.closingReading === 'number'
+      typeof nozzle.openingReading === 'number' &&
+      typeof nozzle.closingReading === 'number'
     ) {
-      pump.totalLiters = Math.max(
-        pump.closingReading - pump.openingReading,
+      nozzle.totalLiters = Math.max(
+        nozzle.closingReading - nozzle.openingReading,
         0
       );
 
-      if (typeof pump.unitPrice === 'number') {
-        pump.totalAmount = pump.totalLiters * pump.unitPrice;
+      if (typeof nozzle.unitPrice === 'number') {
+        nozzle.totalAmount = nozzle.totalLiters * nozzle.unitPrice;
       }
     }
 
-    totalLiters += pump.totalLiters || 0;
-    totalAmount += pump.totalAmount || 0;
+    totalLiters += nozzle.totalLiters || 0;
+    totalAmount += nozzle.totalAmount || 0;
   });
+
+  // ✅ حساب المصروفات
+  if (Array.isArray(this.expenses)) {
+    this.expenses.forEach((e) => {
+      expensesTotal += e.amount || 0;
+    });
+  }
 
   this.totalLiters = totalLiters;
   this.totalAmount = totalAmount;
+  this.expensesTotal = expensesTotal;
 
-  // 💰 إجمالي المبيعات
+  // 💰 التحصيل
   this.totalSales =
     (this.paymentTypes?.cash || 0) +
     (this.paymentTypes?.card || 0) +
     (this.paymentTypes?.mada || 0) +
     (this.paymentTypes?.other || 0);
 
-  // ⚖️ الفرق
-  this.calculatedDifference = this.totalSales - this.totalAmount;
+  // 🧮 صافي المبيعات
+  this.netSales = this.totalSales - expensesTotal;
+
+  // ⚖️ الفرق النهائي
+  this.calculatedDifference = this.netSales - this.totalAmount;
 
   next();
 });
+
 
 module.exports = mongoose.model('PumpSession', pumpSessionSchema);
