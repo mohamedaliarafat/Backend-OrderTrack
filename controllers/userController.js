@@ -10,15 +10,38 @@ const ALLOWED_ROLES = [
   'employee',
   'viewer',
   'station_boy',
+  'sales_manager_statiun',
+  'maintenance_car_management',
 ];
 
 const PERMISSIONS = [
+  'orders_view',
+  'orders_create_customer',
+  'orders_create_supplier',
+  'orders_merge',
   'orders_edit',
   'orders_delete',
   'orders_manage',
+  'customers_view',
+  'customers_manage',
+  'drivers_view',
+  'drivers_manage',
+  'suppliers_view',
+  'suppliers_manage',
   'users_manage',
   'settings_access',
   'reports_view',
+  'stats_total_orders',
+  'stats_supplier_pending',
+  'stats_supplier_merged',
+  'stats_customer_waiting',
+  'stats_customer_assigned',
+  'stats_merged_orders',
+  'stats_completed_orders',
+  'stats_today_orders',
+  'stats_week_orders',
+  'stats_month_orders',
+  'stats_cancelled_orders',
 ];
 
 const normalizeRole = (role) => {

@@ -4,15 +4,14 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 
+// Load environment variables
 dotenv.config();
 
-// ===============================
-// 📦 IMPORT ROUTES
-// ===============================
+// Import routes
 const authRoutes = require('./routes/authRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const activityRoutes = require('./routes/activityRoutes');
-const customerRoutes = require('./routes/customerRoutes');
+const customerRoutes = require('./routes/customerRoutes'); 
 const notificationRoutes = require('./routes/notificationRoutes');
 const driverRoutes = require('./routes/driverRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
@@ -28,65 +27,29 @@ const approvalRequestRoutes = require('./routes/approvalRequestRoutes');
 const technicianLocationRoutes = require('./routes/technicianLocationRoutes');
 const stationRoutes = require('./routes/stationRoutes');
 
+
+// Initialize Express app
 const app = express();
 
-// ===============================
-// 🔐 TRUST PROXY (NGINX + HTTPS)
-// ===============================
-app.set('trust proxy', 1);
-
-// ===============================
-// 🌍 CORS CONFIG (IMPORTANT)
-// ===============================
-const allowedOrigins = [
-  'https://albuhairaalarabia.com',
-  'https://www.albuhairaalarabia.com',
-  'https://system-albuhairaalarabia.cloud',
-];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // Mobile apps / Postman
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error(`CORS blocked: ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
-app.options('*', cors());
-
-// ===============================
-// 🧩 MIDDLEWARES
-// ===============================
-app.use(express.json({ limit: '10mb' }));
+// Middleware
+app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ===============================
-// 🗄️ DATABASE
-// ===============================
-mongoose.connect(
-  process.env.MONGODB_URL ||
-    'mongodb+srv://nasser66:Qwert1557@cluster0.odv4fdk.mongodb.net/',
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }
-)
+// Database connection
+mongoose.connect(process.env.MONGODB_URL || 'mongodb+srv://nasser66:Qwert1557@cluster0.odv4fdk.mongodb.net/', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
 .then(() => console.log('✅ MongoDB Connected Successfully'))
 .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
-// ===============================
-// 🚏 API ROUTES
-// ===============================
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/activities', activityRoutes);
-app.use('/api/customers', customerRoutes);
+app.use('/api/customers', customerRoutes); 
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/drivers', driverRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -102,51 +65,18 @@ app.use('/api/approval-requests', approvalRequestRoutes);
 app.use('/api/technician-locations', technicianLocationRoutes);
 app.use('/api/stations', stationRoutes);
 
-// ===============================
-// 🏠 ROOT
-// ===============================
+// Root endpoint
 app.get('/', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: 'Fuel Supply Tracking System API',
-  });
+  res.json({ message: 'Fuel Supply Tracking System API' });
 });
 
-// ===============================
-// 🧪 API ROOT (IMPORTANT FIX)
-// ===============================
-app.get('/api', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: 'API is running',
-    version: '1.0.0',
-  });
-});
-
-// ===============================
-// ❌ 404 HANDLER
-// ===============================
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-  });
-});
-
-// ===============================
-// ❌ ERROR HANDLER
-// ===============================
+// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('🔥 ERROR:', err.message);
-  res.status(500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-  });
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
 });
 
-// ===============================
-// 🚀 START SERVER
-// ===============================
+// Start server
 const PORT = process.env.PORT || 6030;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
