@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Station = require('../models/Station');
 
 const ALLOWED_ROLES = [
   'owner',

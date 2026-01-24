@@ -1,6 +1,35 @@
 const Customer = require('../models/Customer');
 const Activity = require('../models/Activity');
 const mongoose = require('mongoose');
+const multer = require('multer');
+const { initFirebase } = require('../config/firebase');
+
+const CUSTOMER_DOCUMENT_LABELS = {
+  commercialRecord: 'السجل التجاري',
+  energyCertificate: 'شهادة الطاقة',
+  taxCertificate: 'شهادة الضريبة',
+  safetyCertificate: 'شهادة السلامة',
+  municipalLicense: 'رخصة بلدي',
+  additionalDocument: 'مرفق إضافي',
+};
+
+const CUSTOMER_DOCUMENT_FIELDS = Object.keys(CUSTOMER_DOCUMENT_LABELS).map(
+  (name) => ({ name, maxCount: 1 }),
+);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+const uploadDocumentsMiddleware = upload.fields(CUSTOMER_DOCUMENT_FIELDS);
+
+const getFirebaseBucket = () => {
+  const admin = initFirebase();
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+  if (!admin || !bucketName) return null;
+  return admin.storage().bucket(bucketName);
+};
 
 // ===============================
 // إنشاء عميل جديد
@@ -245,6 +274,117 @@ exports.searchCustomers = async (req, res) => {
     res.json(customers);
   } catch (error) {
     console.error('SEARCH CUSTOMER ERROR:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.uploadCustomerDocuments = (req, res) => {
+  uploadDocumentsMiddleware(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ error: 'العميل غير موجود' });
+    }
+
+    const bucket = getFirebaseBucket();
+    if (!bucket) {
+      return res
+        .status(500)
+        .json({ error: 'Firebase غير مهيأ، راجع إعدادات البيئة' });
+    }
+
+    const files = req.files || {};
+    const addedDocuments = [];
+
+    for (const [docType, label] of Object.entries(CUSTOMER_DOCUMENT_LABELS)) {
+      const fileArray = files[docType];
+      if (!fileArray || fileArray.length === 0) continue;
+
+      const file = fileArray[0];
+      const storagePath = `customers/${customer._id}/${docType}/${Date.now()}_${file.originalname}`;
+      const fileRef = bucket.file(storagePath);
+
+      try {
+        await fileRef.save(file.buffer, {
+          contentType: file.mimetype,
+        });
+        await fileRef.makePublic();
+      } catch (uploadError) {
+        console.error('UPLOAD CUSTOMER DOCUMENT ERROR:', uploadError);
+        return res.status(500).json({
+          error: 'فشل رفع المستندات، حاول مرة أخرى',
+        });
+      }
+
+      const documentRecord = {
+        filename: file.originalname,
+        label,
+        url: `https://storage.googleapis.com/${bucket.name}/${storagePath}`,
+        storagePath,
+        docType,
+        uploadedBy: req.user._id,
+        uploadedByName: req.user.name,
+        uploadedAt: new Date(),
+      };
+
+      customer.documents.push(documentRecord);
+      addedDocuments.push(documentRecord);
+    }
+
+    if (addedDocuments.length === 0) {
+      return res.status(400).json({ error: 'لا يوجد مرفقات' });
+    }
+
+    await customer.save();
+
+    res.json({
+      message: 'تم رفع مستندات العميل بنجاح',
+      documents: customer.documents,
+    });
+  });
+};
+
+exports.deleteCustomerDocument = async (req, res) => {
+  try {
+    const { id, documentId } = req.params;
+    const customer = await Customer.findById(id);
+    if (!customer) {
+      return res.status(404).json({ error: 'العميل غير موجود' });
+    }
+
+    const document = customer.documents.id(documentId);
+    if (!document) {
+      return res.status(404).json({ error: 'المرفق غير موجود' });
+    }
+
+    const isOwner =
+      document.uploadedBy?.toString() === req.user._id.toString() ||
+      req.user.role === 'owner';
+
+    if (!isOwner) {
+      return res
+        .status(403)
+        .json({ error: 'لا تملك صلاحية حذف هذا المرفق' });
+    }
+
+    const bucket = getFirebaseBucket();
+    if (bucket && document.storagePath) {
+      try {
+        await bucket.file(document.storagePath).delete();
+      } catch (deleteError) {
+        console.warn('Failed to delete customer document file', deleteError);
+      }
+    }
+
+    document.remove();
+    await customer.save();
+
+    res.json({ message: 'تم حذف المستند بنجاح' });
+  } catch (error) {
+    console.error('DELETE CUSTOMER DOCUMENT ERROR:', error);
     res.status(500).json({ error: error.message });
   }
 };
