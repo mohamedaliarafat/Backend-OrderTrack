@@ -1,7 +1,9 @@
 ﻿const mongoose = require('mongoose');
 
 const maintenanceSchema = new mongoose.Schema({
+  // =========================
   // Basic Information
+  // =========================
   driverId: {
     type: String,
     required: true,
@@ -38,15 +40,16 @@ const maintenanceSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
-  
+
+  // =========================
   // Monthly Inspection Data
+  // =========================
   inspectionMonth: {
-    type: String, // Format: YYYY-MM
+    type: String, // YYYY-MM
     required: true
   },
   inspectionDate: {
     type: Date,
-    required: true,
     default: Date.now
   },
   inspectedBy: {
@@ -58,13 +61,36 @@ const maintenanceSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  
-  // Safety Procedures (Daily checks)
+
+  // =========================
+  // 🚗 GLOBAL ODOMETER / OIL STATE (جديد)
+  // =========================
+  lastOdometerReading: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  lastOilChangeOdometer: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  totalDistanceSinceOilChange: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  // =========================
+  // Daily Checks
+  // =========================
   dailyChecks: [{
     date: {
       type: Date,
       required: true
     },
+
+    // ---------- Safety ----------
     vehicleSafety: {
       type: String,
       enum: ['تم', 'لم يتم', 'غير مطلوب'],
@@ -115,12 +141,48 @@ const maintenanceSchema = new mongoose.Schema({
       enum: ['تم', 'لم يتم', 'غير مطلوب'],
       default: 'لم يتم'
     },
+
     inspectionResult: {
-  type: String,
-  trim: true,
-  default: 'pending'
-},
-    
+      type: String,
+      trim: true,
+      default: 'pending'
+    },
+
+    // =========================
+    // 🚗 ODOMETER (جديد)
+    // =========================
+    odometerReading: {
+      type: Number,
+      min: 0
+    },
+    previousOdometer: {
+      type: Number,
+      min: 0
+    },
+    dailyDistance: {
+      type: Number,
+      min: 0
+    },
+
+    // =========================
+    // 🛢️ OIL TRACKING (جديد)
+    // =========================
+    oilStatus: {
+      type: String,
+      enum: ['طبيعي', 'قارب على التغيير', 'يحتاج تغيير'],
+      default: 'طبيعي'
+    },
+    oilChangeApproved: {
+      type: Boolean,
+      default: false
+    },
+    oilChangeApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    oilChangeApprovedAt: Date,
+
+    // ---------- Maintenance ----------
     maintenanceType: String,
     maintenanceCost: Number,
     maintenanceInvoices: [{
@@ -128,6 +190,8 @@ const maintenanceSchema = new mongoose.Schema({
       url: String
     }],
     notes: String,
+
+    // ---------- Workflow ----------
     checkedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
@@ -145,8 +209,10 @@ const maintenanceSchema = new mongoose.Schema({
       default: 'none'
     }
   }],
-  
+
+  // =========================
   // Monthly Summary
+  // =========================
   monthlyStatus: {
     type: String,
     enum: ['مكتمل', 'غير مكتمل', 'تحت المراجعة', 'مرفوض'],
@@ -164,8 +230,10 @@ const maintenanceSchema = new mongoose.Schema({
     type: Number,
     default: 30
   },
-  
+
+  // =========================
   // Supervisor Actions
+  // =========================
   supervisorActions: [{
     date: {
       type: Date,
@@ -189,8 +257,10 @@ const maintenanceSchema = new mongoose.Schema({
       readAt: Date
     }]
   }],
-  
+
+  // =========================
   // Additional Information
+  // =========================
   vehicleType: {
     type: String,
     enum: ['صهريج وقود', 'ناقلة غاز', 'مركبة خفيفة', 'مركبة ثقيلة'],
@@ -202,27 +272,35 @@ const maintenanceSchema = new mongoose.Schema({
     type: String,
     enum: ['بنزين', 'ديزل', 'غاز طبيعي', 'كهرباء']
   },
+
   vehicleOperatingCardNumber: String,
   vehicleOperatingCardIssueDate: Date,
   vehicleOperatingCardExpiryDate: Date,
+
   driverOperatingCardName: String,
   driverOperatingCardNumber: String,
   driverOperatingCardIssueDate: Date,
   driverOperatingCardExpiryDate: Date,
+
   vehicleRegistrationSerialNumber: String,
   vehicleRegistrationNumber: String,
   vehicleRegistrationIssueDate: Date,
   vehicleRegistrationExpiryDate: Date,
+
   driverInsurancePolicyNumber: String,
   driverInsuranceIssueDate: Date,
   driverInsuranceExpiryDate: Date,
+
   vehicleInsurancePolicyNumber: String,
   vehicleInsuranceIssueDate: Date,
   vehicleInsuranceExpiryDate: Date,
+
   insuranceNumber: String,
   insuranceExpiry: Date,
-  
+
+  // =========================
   // Status and Tracking
+  // =========================
   status: {
     type: String,
     enum: ['active', 'inactive', 'under_maintenance', 'out_of_service'],
@@ -230,12 +308,20 @@ const maintenanceSchema = new mongoose.Schema({
   },
   lastMaintenanceDate: Date,
   nextMaintenanceDate: Date,
-  
+
+  // =========================
   // Notifications
+  // =========================
   notifications: [{
     type: {
       type: String,
-      enum: ['daily_check_missing', 'supervisor_warning', 'license_expiry', 'insurance_expiry', 'maintenance_due']
+      enum: [
+        'daily_check_missing',
+        'supervisor_warning',
+        'license_expiry',
+        'insurance_expiry',
+        'maintenance_due'
+      ]
     },
     message: String,
     sentTo: [{
@@ -251,8 +337,10 @@ const maintenanceSchema = new mongoose.Schema({
       default: false
     }
   }],
-  
+
+  // =========================
   // Timestamps
+  // =========================
   createdAt: {
     type: Date,
     default: Date.now
@@ -263,17 +351,20 @@ const maintenanceSchema = new mongoose.Schema({
   }
 });
 
-// Update timestamps on save
-maintenanceSchema.pre('save', function(next) {
+// =========================
+// Hooks
+// =========================
+maintenanceSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-// Index for efficient queries
+// =========================
+// Indexes
+// =========================
 maintenanceSchema.index({ inspectionMonth: 1, plateNumber: 1 });
 maintenanceSchema.index({ driverId: 1 });
 maintenanceSchema.index({ status: 1 });
 maintenanceSchema.index({ 'dailyChecks.date': 1 });
 
 module.exports = mongoose.model('Maintenance', maintenanceSchema);
-

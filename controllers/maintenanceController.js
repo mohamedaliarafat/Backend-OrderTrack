@@ -7,6 +7,28 @@ const fs = require('fs');
 const { sendEmail } = require('../services/emailService');
 const path = require('path');
 
+
+
+function buildDailyChecksForMonth(inspectionMonth) {
+  const [y, m] = inspectionMonth.split('-').map(Number);
+  const year = y;
+  const monthIndex = m - 1;
+
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const dailyChecks = [];
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    dailyChecks.push({
+      date: new Date(year, monthIndex, day),
+      status: 'pending',
+      // باقي الحقول في الموديل default = "لم يتم"
+    });
+  }
+
+  return { dailyChecks, daysInMonth };
+}
+
+
 const NOT_DONE_VALUE = 'U,U. USO?U.';
 const NOT_DONE_VALUES = new Set([
   NOT_DONE_VALUE,
@@ -1059,6 +1081,8 @@ exports.testEmailSending = async (req, res) => {
   }
 };
 
+
+
 // إضافة فحص يومي
 exports.addDailyCheck = async (req, res) => {
   try {
@@ -1073,7 +1097,41 @@ exports.addDailyCheck = async (req, res) => {
       });
     }
 
-    // التحقق من وجود فحص اليوم
+    // ==================================================
+    // 🚗 ODOMETER + OIL LOGIC (إضافة فقط)
+    // ==================================================
+    if (typeof dailyCheckData.odometerReading === 'number') {
+      const prevOdometer =
+        typeof maintenance.lastOdometerReading === 'number' &&
+        maintenance.lastOdometerReading > 0
+          ? maintenance.lastOdometerReading
+          : dailyCheckData.odometerReading;
+
+      const dailyDistance =
+        dailyCheckData.odometerReading >= prevOdometer
+          ? dailyCheckData.odometerReading - prevOdometer
+          : 0;
+
+      dailyCheckData.previousOdometer = prevOdometer;
+      dailyCheckData.dailyDistance = dailyDistance;
+
+      maintenance.lastOdometerReading = dailyCheckData.odometerReading;
+      maintenance.totalDistanceSinceOilChange =
+        (maintenance.totalDistanceSinceOilChange || 0) + dailyDistance;
+
+      if (maintenance.totalDistanceSinceOilChange >= 5000) {
+        dailyCheckData.oilStatus = 'يحتاج تغيير';
+        maintenance.status = 'under_maintenance';
+      } else if (maintenance.totalDistanceSinceOilChange >= 4500) {
+        dailyCheckData.oilStatus = 'قارب على التغيير';
+      } else {
+        dailyCheckData.oilStatus = 'طبيعي';
+      }
+    }
+
+    // ==================================================
+    // التحقق من وجود فحص اليوم (كما هو)
+    // ==================================================
     const existingCheckIndex = maintenance.dailyChecks.findIndex(
       (check) =>
         moment(check.date).format('YYYY-MM-DD') ===
@@ -1081,7 +1139,6 @@ exports.addDailyCheck = async (req, res) => {
     );
 
     if (existingCheckIndex !== -1) {
-      // تحديث فحص موجود
       maintenance.dailyChecks[existingCheckIndex] = {
         ...maintenance.dailyChecks[existingCheckIndex].toObject(),
         ...dailyCheckData,
@@ -1091,7 +1148,6 @@ exports.addDailyCheck = async (req, res) => {
         submittedAt: new Date()
       };
     } else {
-      // إضافة فحص جديد
       maintenance.dailyChecks.push({
         ...dailyCheckData,
         checkedBy: req.user._id,
@@ -1101,7 +1157,9 @@ exports.addDailyCheck = async (req, res) => {
       });
     }
 
-    // تحديث العدادات
+    // ==================================================
+    // تحديث العدادات (كما هو)
+    // ==================================================
     maintenance.completedDays = maintenance.dailyChecks.filter(
       (check) => check.status === 'approved'
     ).length;
@@ -1111,20 +1169,22 @@ exports.addDailyCheck = async (req, res) => {
 
     await maintenance.save();
 
-    // الرد الفوري للمستخدم
+    // ==================================================
+    // الرد الفوري للمستخدم (كما هو)
+    // ==================================================
     res.json({
       success: true,
       message: 'تم إرسال الفحص اليومي للمراجعة',
       data: maintenance,
     });
 
-    // ===============================
+    // ==================================================
     // العمل في الخلفية بعد الرد
-    // ===============================
+    // ==================================================
     setImmediate(async () => {
       try {
         console.log('🔄 بدء إرسال الإشعارات في الخلفية');
-        
+
         const updatedCheck =
           existingCheckIndex !== -1
             ? maintenance.dailyChecks[existingCheckIndex]
@@ -1139,7 +1199,9 @@ exports.addDailyCheck = async (req, res) => {
           checkedByName = checkedByName || checkedUser?.name;
         }
 
-        // إشعار النواقص
+        // ==================================================
+        // إشعار النواقص (كما هو)
+        // ==================================================
         console.log('📧 إرسال إشعار النواقص...');
         await notifyMissingChecksByEmail({
           maintenance,
@@ -1148,13 +1210,17 @@ exports.addDailyCheck = async (req, res) => {
           checkedByEmail,
         });
 
-        // إرسال إشعار للمشرفين
+        // ==================================================
+        // إشعار المشرفين (كما هو)
+        // ==================================================
         console.log('📧 إرسال إشعار للمشرفين...');
         const supervisors = await User.find({ role: 'supervisor' }).select('name email');
 
         if (supervisors.length > 0) {
-          const supervisorEmails = supervisors.map(s => s.email).filter(email => email && email.includes('@'));
-          
+          const supervisorEmails = supervisors
+            .map(s => s.email)
+            .filter(email => email && email.includes('@'));
+
           if (supervisorEmails.length > 0) {
             const data = {
               plateNumber: maintenance.plateNumber,
@@ -1167,12 +1233,70 @@ exports.addDailyCheck = async (req, res) => {
               subject: 'فحص يومي جديد بانتظار المراجعة'
             };
 
-            // إرسال كـ BCC للمشرفين
-            await sendNotificationEmail('dailyCheckAdded', data, undefined, supervisorEmails);
+            await sendNotificationEmail(
+              'dailyCheckAdded',
+              data,
+              undefined,
+              supervisorEmails
+            );
+
             console.log(`✅ تم إرسال إشعار إلى ${supervisorEmails.length} مشرف`);
           }
         }
-        
+
+        // ==================================================
+        // 🔔 تنبيه الزيت → الفني + مدير الصيانة (إضافة جديدة)
+        // ==================================================
+        if (
+          updatedCheck.oilStatus === 'قارب على التغيير' ||
+          updatedCheck.oilStatus === 'يحتاج تغيير'
+        ) {
+          const maintenanceUsers = await User.find({
+            role: { $in: ['maintenance_car_management', 'maintenance'] }
+          }).select('_id name email');
+
+          const recipientIds = maintenanceUsers.map(u => u._id);
+          const recipientEmails = maintenanceUsers
+            .map(u => u.email)
+            .filter(e => e && e.includes('@'));
+
+          const isCritical = updatedCheck.oilStatus === 'يحتاج تغيير';
+
+          const messageText = isCritical
+            ? `🚨 المركبة ${maintenance.plateNumber} تجاوزت 5000 كم بدون تغيير زيت`
+            : `⚠️ المركبة ${maintenance.plateNumber} اقتربت من موعد تغيير الزيت (4500 كم)`;
+
+          maintenance.notifications.push({
+            type: 'maintenance_due',
+            message: messageText,
+            sentTo: recipientIds
+          });
+
+          await maintenance.save();
+
+          if (recipientEmails.length > 0) {
+            await sendNotificationEmail(
+              'supervisorWarning',
+              {
+                employeeName: 'فريق الصيانة',
+                plateNumber: maintenance.plateNumber,
+                inspectionMonth: maintenance.inspectionMonth,
+                message: messageText,
+                sentByName: 'نظام الصيانة الآلي',
+                actionRequired: isCritical
+                  ? 'إيقاف المركبة فورًا وتغيير الزيت'
+                  : 'الاستعداد لتغيير الزيت',
+                deadline: isCritical ? 'فوري' : 'قبل 5000 كم',
+                subject: isCritical
+                  ? '🚨 تنبيه عاجل: تغيير زيت'
+                  : '⚠️ تنبيه: اقتراب تغيير الزيت'
+              },
+              undefined,
+              recipientEmails
+            );
+          }
+        }
+
         console.log('✅ اكتملت إرسال الإشعارات في الخلفية');
       } catch (bgError) {
         console.error('❌ خطأ في إرسال الإشعارات في الخلفية:', bgError.message);
@@ -1188,6 +1312,8 @@ exports.addDailyCheck = async (req, res) => {
     });
   }
 };
+
+
 
 // اعتماد الفحص اليومي
 exports.approveCheck = async (req, res) => {
@@ -1375,6 +1501,81 @@ exports.rejectCheck = async (req, res) => {
     });
   }
 };
+
+exports.generateMonthManually = async (req, res) => {
+  try {
+    const { month } = req.body; // yyyy-MM
+
+    // 1️⃣ هات آخر سجل لكل مركبة
+    const latestRecords = await Maintenance.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$plateNumber',
+          doc: { $first: '$$ROOT' }
+        }
+      }
+    ]);
+
+    const created = [];
+
+    for (const item of latestRecords) {
+      const old = item.doc;
+
+      // 2️⃣ تأكد إن الشهر مش موجود
+      const exists = await Maintenance.findOne({
+        plateNumber: old.plateNumber,
+        inspectionMonth: month
+      });
+      if (exists) continue;
+
+      // 3️⃣ أنشئ سجل جديد بنفس البيانات
+      const newRecord = new Maintenance({
+        driverId: old.driverId,
+        driverName: old.driverName,
+        tankNumber: old.tankNumber,
+        plateNumber: old.plateNumber,
+        driverLicenseNumber: old.driverLicenseNumber,
+        driverLicenseExpiry: old.driverLicenseExpiry,
+        vehicleLicenseNumber: old.vehicleLicenseNumber,
+        vehicleLicenseExpiry: old.vehicleLicenseExpiry,
+
+        vehicleType: old.vehicleType, // ✅ enum صحيح
+        fuelType: old.fuelType,
+
+        inspectionMonth: month,
+        inspectionDate: new Date(),
+
+        inspectedBy: req.user._id,
+        inspectedByName: req.user.name,
+
+        dailyChecks: [], // ⬅️ هتتولد لاحقًا
+        monthlyStatus: 'غير مكتمل',
+
+        totalDays: moment(month, 'YYYY-MM').daysInMonth(),
+        completedDays: 0,
+        pendingDays: moment(month, 'YYYY-MM').daysInMonth(),
+      });
+
+      await newRecord.save();
+      created.push(newRecord);
+    }
+
+    res.json({
+      success: true,
+      message: `تم إنشاء ${created.length} سجل صيانة لشهر ${month}`,
+      data: created
+    });
+  } catch (error) {
+    console.error('generateMonthManually error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'فشل إنشاء الشهر',
+      error: error.message
+    });
+  }
+};
+
 
 // إرسال تحذير للموظف
 exports.sendWarning = async (req, res) => {
