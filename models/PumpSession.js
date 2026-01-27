@@ -127,15 +127,21 @@ const pumpSessionSchema = new mongoose.Schema(
       required: true,
     },
     expenses: {
-  type: [expenseSchema],
-  default: [],
-},
+      type: [expenseSchema],
+      default: [],
+    },
 
-expensesTotal: {
-  type: Number,
-  default: 0,
-  min: 0,
-},
+    expensesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    carriedForwardBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
 
 netSales: {
   type: Number,

@@ -7,8 +7,8 @@ const { sendEmail } = require('../services/emailService');
 
 
 // Generate session number
-const generateSessionNumber = async (stationCode) => {
-  const today = new Date();
+const generateSessionNumber = async (stationCode, baseDate = new Date()) => {
+  const today = new Date(baseDate);
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
   
   const lastSession = await PumpSession.findOne({
@@ -31,6 +31,34 @@ const SESSION_NOTIFICATION_ROLES = [
 ];
 
 
+
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const normalizeNozzle = (reading) => {
+  if (!reading) return null;
+  const openingReading = toNumberOrNull(reading.openingReading) ?? 0;
+  const closingReading = toNumberOrNull(reading.closingReading);
+  return {
+    pumpId: reading.pumpId,
+    pumpNumber: reading.pumpNumber ?? '',
+    nozzleNumber: toNumberOrNull(reading.nozzleNumber) ?? 0,
+    side:
+      reading.position?.toString().toLowerCase() === 'left' ? 'left' : 'right',
+    fuelType: reading.fuelType ?? '',
+    openingReading,
+    openingImageUrl: reading.openingImageUrl,
+    closingReading,
+    closingImageUrl: reading.closingImageUrl,
+    unitPrice: toNumberOrNull(reading.unitPrice),
+    differenceReason: reading.differenceReason,
+    notes: reading.notes,
+  };
+};
 
 exports.openSession = async (req, res) => {
   try {
@@ -66,12 +94,23 @@ exports.openSession = async (req, res) => {
     // =========================
     // 🔢 رقم الجلسة
     // =========================
+    const isSalesManager = req.user?.role === 'sales_manager_statiun';
+    const parsedSessionDate =
+      isSalesManager && sessionData.sessionDate
+        ? new Date(sessionData.sessionDate)
+        : null;
+    const sessionDate =
+      parsedSessionDate && !Number.isNaN(parsedSessionDate.getTime())
+        ? parsedSessionDate
+        : new Date();
+
     sessionData.sessionNumber = await generateSessionNumber(
-      station.stationCode
+      station.stationCode,
+      sessionDate
     );
 
     sessionData.stationName = station.stationName;
-    sessionData.sessionDate = new Date();
+    sessionData.sessionDate = sessionDate;
     sessionData.openingEmployeeId = req.user._id;
     sessionData.openingEmployeeName = req.user.name;
 
@@ -145,7 +184,7 @@ exports.openSession = async (req, res) => {
 
         openingReading: nr.openingReading,
         openingImageUrl: nr.openingImageUrl, // ✅ Firebase URL فقط
-        openingTime: new Date(),
+        openingTime: sessionDate,
 
         unitPrice: fuelPrice?.price || 0,
       });
@@ -391,6 +430,78 @@ exports.closeSession = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ closeSession error:', error);
+    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+  }
+};
+
+exports.updateSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const updates = req.body || {};
+
+    const session = await PumpSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'الجلسة غير موجودة' });
+    }
+
+    if (typeof updates.notes === 'string') {
+      session.notes = updates.notes.trim() || undefined;
+    }
+
+    if (typeof updates.differenceReason === 'string') {
+      session.differenceReason = updates.differenceReason.trim() || undefined;
+    }
+
+    const carriedForward = toNumberOrNull(updates.carriedForwardBalance);
+    if (carriedForward !== null) {
+      session.carriedForwardBalance = carriedForward;
+    }
+
+    if (updates.paymentTypes && typeof updates.paymentTypes === 'object') {
+      const existing = session.paymentTypes || {};
+      session.paymentTypes = {
+        cash: toNumberOrNull(updates.paymentTypes.cash) ?? existing.cash ?? 0,
+        card: toNumberOrNull(updates.paymentTypes.card) ?? existing.card ?? 0,
+        mada: toNumberOrNull(updates.paymentTypes.mada) ?? existing.mada ?? 0,
+        other:
+          toNumberOrNull(updates.paymentTypes.other) ?? existing.other ?? 0,
+      };
+    }
+
+    if (Array.isArray(updates.nozzleReadings)) {
+      const sanitized = updates.nozzleReadings
+        .map(normalizeNozzle)
+        .filter((n) => n);
+      if (sanitized.length) {
+        session.nozzleReadings = sanitized;
+      }
+    }
+
+    if (Array.isArray(updates.expenses)) {
+      session.expenses = updates.expenses
+        .map((expense) => {
+          const amount = toNumberOrNull(expense.amount);
+          const category = (expense.category || '').trim();
+          if (amount === null || amount < 0 || !category) {
+            return null;
+          }
+          return {
+            amount,
+            category,
+            description: (expense.description || '').trim(),
+          };
+        })
+        .filter((exp) => exp);
+    }
+
+    await session.save();
+
+    res.json({
+      success: true,
+      session,
+    });
+  } catch (error) {
+    console.error('❌ updateSession error:', error);
     res.status(500).json({ error: 'حدث خطأ في السيرفر' });
   }
 };

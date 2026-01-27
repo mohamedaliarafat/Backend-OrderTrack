@@ -28,6 +28,7 @@ router.get('/stations/:stationId/stats', stationController.getStationStats);
 router.get('/sessions', pumpSessionController.getSessions);
 router.get('/sessions/:id', pumpSessionController.getSession);
 router.post('/sessions/open', pumpSessionController.openSession);
+router.put('/sessions/:sessionId', pumpSessionController.updateSession);
 router.put('/sessions/:sessionId/close', pumpSessionController.closeSession);
 router.put('/sessions/:sessionId/approve-opening', pumpSessionController.approveOpening);
 router.put('/sessions/:sessionId/approve-closing', pumpSessionController.approveClosing);
