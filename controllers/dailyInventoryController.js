@@ -15,56 +15,89 @@ const getArabicDate = () => {
 exports.createInventory = async (req, res) => {
   try {
     const inventoryData = req.body;
-    
-    // Check if inventory already exists for this date and station
+
+    // ===============================
+    // ✅ تأكيد stationId وتحويله ObjectId
+    // ===============================
+    if (!mongoose.Types.ObjectId.isValid(inventoryData.stationId)) {
+      return res.status(400).json({ error: 'معرّف المحطة غير صحيح' });
+    }
+
+    inventoryData.stationId = new mongoose.Types.ObjectId(
+      inventoryData.stationId
+    );
+
+    // ===============================
+    // ✅ التحقق من عدم وجود جرد مسبق
+    // ===============================
+    const startOfDay = new Date(inventoryData.inventoryDate);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(inventoryData.inventoryDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
     const existingInventory = await DailyInventory.findOne({
       stationId: inventoryData.stationId,
-      inventoryDate: { 
-        $gte: new Date(inventoryData.inventoryDate).setHours(0, 0, 0, 0),
-        $lt: new Date(inventoryData.inventoryDate).setHours(23, 59, 59, 999)
-      },
-      fuelType: inventoryData.fuelType
+      fuelType: inventoryData.fuelType,
+      inventoryDate: { $gte: startOfDay, $lte: endOfDay }
     });
 
     if (existingInventory) {
-      return res.status(400).json({ error: 'يوجد جرد يومي مسجل بالفعل لهذا التاريخ ونوع الوقود' });
+      return res.status(400).json({
+        error: 'يوجد جرد يومي مسجل بالفعل لهذا التاريخ ونوع الوقود'
+      });
     }
 
-    // Get station info
+    // ===============================
+    // ✅ جلب بيانات المحطة
+    // ===============================
     const station = await Station.findById(inventoryData.stationId);
     if (!station) {
       return res.status(404).json({ error: 'المحطة غير موجودة' });
     }
 
-    // Set additional data
     inventoryData.stationName = station.stationName;
     inventoryData.arabicDate = getArabicDate();
     inventoryData.preparedBy = req.user._id;
 
-    // Calculate total sales from sessions for this date
-    const targetDate = new Date(inventoryData.inventoryDate);
-    targetDate.setHours(0, 0, 0, 0);
-    
-    const nextDay = new Date(targetDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-
+    // ===============================
+    // ✅ حساب المبيعات من الجلسات
+    // ===============================
     const sessions = await PumpSession.find({
       stationId: inventoryData.stationId,
       fuelType: inventoryData.fuelType,
-      sessionDate: { $gte: targetDate, $lt: nextDay },
+      sessionDate: { $gte: startOfDay, $lte: endOfDay },
       status: { $in: ['مغلقة', 'معتمدة'] }
     });
 
-    inventoryData.totalSales = sessions.reduce((sum, session) => sum + (session.totalLiters || 0), 0);
-    inventoryData.pumpCount = sessions.length;
-    
-    // Calculate total revenue from sessions
-    inventoryData.totalRevenue = sessions.reduce((sum, session) => sum + (session.totalSales || 0), 0);
+    inventoryData.totalSales = sessions.reduce(
+      (sum, s) => sum + (s.totalLiters || 0),
+      0
+    );
 
+    inventoryData.pumpCount = sessions.length;
+
+    inventoryData.totalRevenue = sessions.reduce(
+      (sum, s) => sum + (s.totalSales || 0),
+      0
+    );
+
+    // ===============================
+    // ✅ ضمان وجود expenses
+    // ===============================
+    if (!Array.isArray(inventoryData.expenses)) {
+      inventoryData.expenses = [];
+    }
+
+    // ===============================
+    // ✅ إنشاء الجرد
+    // ===============================
     const inventory = new DailyInventory(inventoryData);
     await inventory.save();
 
-    // Log activity
+    // ===============================
+    // ✅ تسجيل النشاط
+    // ===============================
     const activity = new Activity({
       inventoryId: inventory._id,
       activityType: 'إنشاء',
@@ -72,22 +105,26 @@ exports.createInventory = async (req, res) => {
       performedBy: req.user._id,
       performedByName: req.user.name,
       changes: {
-        'التاريخ': inventory.inventoryDate.toISOString().split('T')[0],
+        التاريخ: inventory.inventoryDate.toISOString().split('T')[0],
         'نوع الوقود': inventory.fuelType,
-        'المبيعات': inventory.totalSales.toString()
+        المبيعات: inventory.totalSales.toString()
       }
     });
+
     await activity.save();
 
-    res.status(201).json({
+    return res.status(201).json({
       message: 'تم إنشاء الجرد اليومي بنجاح',
       inventory
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'حدث خطأ في السيرفر' });
+    console.error('❌ createInventory error:', error);
+    return res.status(500).json({
+      error: error.message || 'حدث خطأ في السيرفر'
+    });
   }
 };
+
 
 // Update inventory
 exports.updateInventory = async (req, res) => {

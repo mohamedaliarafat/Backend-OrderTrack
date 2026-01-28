@@ -6,156 +6,190 @@ const dailyInventorySchema = new mongoose.Schema({
     ref: 'Station',
     required: true
   },
+
   stationName: {
     type: String,
     required: true
   },
+
   inventoryDate: {
     type: Date,
     required: true
   },
+
   arabicDate: {
     type: String
   },
+
   fuelType: {
     type: String,
-    required: true,
-    enum: ['بنزين 91', 'بنزين 95', 'ديزل', 'كيروسين']
+    required: true
   },
-  // Opening balance from previous day
+
+  // ✅ الرصيد السابق (قد يكون 0)
   previousBalance: {
     type: Number,
-    required: true,
+    default: 0,
     min: 0
   },
-  // Fuel received today
+
+  // ✅ كمية التوريد
   receivedQuantity: {
     type: Number,
     default: 0,
     min: 0
   },
+
   tankerCount: {
     type: Number,
     default: 0
   },
-  // Total sales from all pumps
+
+  // ✅ المبيعات من الجلسات
   totalSales: {
     type: Number,
     default: 0,
     min: 0
   },
+
   pumpCount: {
     type: Number,
     default: 0
   },
-  // Calculated balance
+
+  // ✅ يتحسب تلقائي
   calculatedBalance: {
     type: Number,
-    min: 0
+    default: 0
   },
-  // Actual physical measurement
+
+  // ✅ قراءة فعلية (اختياري وقت الإنشاء)
   actualBalance: {
     type: Number,
+    default: 0,
     min: 0
   },
-  // Difference (shortage/excess)
+
+  // ✅ فرق المخزون
   difference: {
-    type: Number
+    type: Number,
+    default: 0
   },
+
   differencePercentage: {
-    type: Number
+    type: Number,
+    default: 0
   },
+
   differenceReason: {
     type: String,
-    enum: ['عادي', 'تهوية', 'تسريب', 'خطأ في القياس', 'أخرى']
+    enum: ['عادي', 'تهوية', 'تسريب', 'خطأ في القياس', 'أخرى'],
+    default: 'عادي'
   },
-  // Expenses
+
+  // ✅ المصروفات (اختياري)
   expenses: [{
     amount: {
       type: Number,
-      required: true,
+      default: 0,
       min: 0
     },
     description: {
       type: String,
-      required: true
+      default: ''
     },
     category: {
       type: String,
-      enum: ['مرتبات', 'صيانة', 'كهرباء', 'إيجار', 'أخرى']
+      enum: ['مرتبات', 'صيانة', 'كهرباء', 'إيجار', 'أخرى'],
+      default: 'أخرى'
     },
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     }
   }],
+
   totalExpenses: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
-  // Net revenue
+
   totalRevenue: {
     type: Number,
-    default: 0,
-    min: 0
+    default: 0
   },
+
   netRevenue: {
-    type: Number
+    type: Number,
+    default: 0
   },
-  // Status
+
   status: {
     type: String,
     enum: ['مسودة', 'مكتمل', 'معتمد', 'ملغى'],
     default: 'مسودة'
   },
+
   preparedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+
   approvedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+
   notes: {
-    type: String
+    type: String,
+    default: ''
   },
+
   createdAt: {
     type: Date,
     default: Date.now
   },
+
   updatedAt: {
     type: Date,
     default: Date.now
   }
 });
 
-dailyInventorySchema.pre('save', function(next) {
+
+// ===============================
+// 🔄 حسابات تلقائية قبل الحفظ
+// ===============================
+dailyInventorySchema.pre('save', function (next) {
   this.updatedAt = Date.now();
-  
-  // Calculate balance
-  if (this.previousBalance !== undefined && this.receivedQuantity !== undefined && this.totalSales !== undefined) {
-    this.calculatedBalance = this.previousBalance + this.receivedQuantity - this.totalSales;
+
+  // الرصيد بعد البيع
+  this.calculatedBalance =
+    (this.previousBalance || 0) +
+    (this.receivedQuantity || 0) -
+    (this.totalSales || 0);
+
+  // الفرق
+  this.difference = (this.actualBalance || 0) - this.calculatedBalance;
+
+  if (this.calculatedBalance > 0) {
+    this.differencePercentage =
+      (this.difference / this.calculatedBalance) * 100;
+  } else {
+    this.differencePercentage = 0;
   }
-  
-  // Calculate difference
-  if (this.calculatedBalance !== undefined && this.actualBalance !== undefined) {
-    this.difference = this.actualBalance - this.calculatedBalance;
-    if (this.calculatedBalance > 0) {
-      this.differencePercentage = (this.difference / this.calculatedBalance) * 100;
-    }
+
+  // مجموع المصروفات
+  if (Array.isArray(this.expenses)) {
+    this.totalExpenses = this.expenses.reduce(
+      (sum, e) => sum + (e.amount || 0),
+      0
+    );
   }
-  
-  // Calculate total expenses
-  if (this.expenses && this.expenses.length > 0) {
-    this.totalExpenses = this.expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  }
-  
-  // Calculate net revenue
-  if (this.totalRevenue !== undefined && this.totalExpenses !== undefined) {
-    this.netRevenue = this.totalRevenue - this.totalExpenses;
-  }
-  
+
+  // صافي الإيراد
+  this.netRevenue = (this.totalRevenue || 0) - (this.totalExpenses || 0);
+
   next();
 });
 

@@ -4,6 +4,7 @@ const DailyInventory = require('../models/DailyInventory');
 const Activity = require('../models/Activity');
 const { sendEmail } = require('../services/emailService');
 const User = require('../models/User');
+const FuelStation = require('../models/FuelStation');
 
 const mongoose = require('mongoose');
 
@@ -70,25 +71,77 @@ exports.getStation = async (req, res) => {
       return res.status(404).json({ error: 'المحطة غير موجودة' });
     }
 
-    // Get today's sessions for this station
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
+    const inventoryDateParam = req.query.inventoryDate
+      ? new Date(req.query.inventoryDate)
+      : new Date();
+    const startOfDay = new Date(inventoryDateParam);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Get sessions for the requested day
     const sessions = await PumpSession.find({
       stationId: station._id,
-      sessionDate: { $gte: today }
+      sessionDate: { $gte: startOfDay, $lte: endOfDay }
     }).sort({ createdAt: -1 });
+
+    // Aggregate totals per fuel type
+    const sessionTotalsByFuel = {};
+    const accumulateLiters = (fuelType, liters) => {
+      if (!fuelType || liters <= 0) return;
+      sessionTotalsByFuel[fuelType] =
+        (sessionTotalsByFuel[fuelType] || 0) + liters;
+    };
+
+    sessions.forEach((session) => {
+      const readings = Array.isArray(session.nozzleReadings)
+        ? session.nozzleReadings
+        : [];
+
+      if (readings.length > 0) {
+        readings.forEach((reading) => {
+          const liters =
+            (reading.totalLiters || 0) ||
+            Math.max(
+              0,
+              (reading.closingReading || 0) -
+                (reading.openingReading || 0)
+            );
+          const fuelType = reading.fuelType || session.fuelType;
+          accumulateLiters(fuelType, liters);
+        });
+      } else if (session.totalLiters) {
+        accumulateLiters(session.fuelType, session.totalLiters);
+      }
+    });
 
     // Get today's inventory
     const inventory = await DailyInventory.findOne({
       stationId: station._id,
-      inventoryDate: { $gte: today }
+      inventoryDate: { $gte: startOfDay, $lte: endOfDay }
     });
+
+    // Pull tank capacities from the fuelStation catalog (if available)
+    const fuelStationRecord = await FuelStation.findOne({
+      stationCode: station.stationCode
+    });
+    const fuelTankCapacities = {};
+    if (fuelStationRecord) {
+      (fuelStationRecord.fuelTypes || []).forEach((entry) => {
+        if (entry.fuelName) {
+          fuelTankCapacities[entry.fuelName] =
+            Number(entry.capacity) || fuelTankCapacities[entry.fuelName] || 0;
+        }
+      });
+    }
 
     res.json({
       station,
       todaysSessions: sessions,
-      todaysInventory: inventory
+      todaysInventory: inventory,
+      inventoryDate: startOfDay.toISOString(),
+      sessionTotalsByFuel,
+      fuelTankCapacities
     });
   } catch (error) {
     res.status(500).json({ error: 'حدث خطأ في السيرفر' });
