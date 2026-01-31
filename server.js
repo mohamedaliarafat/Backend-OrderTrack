@@ -310,6 +310,7 @@ dotenv.config();
 // MODELS
 // ===============================
 const Maintenance = require('./models/Maintenance');
+const orderController = require('./controllers/orderController');
 
 // ===============================
 // ROUTES - نظام التتبع الأصلي
@@ -500,6 +501,17 @@ cron.schedule('5 0 1 * *', async () => {
     console.error('❌ Monthly maintenance cron failed:', error.message);
   }
 });
+
+cron.schedule('*/15 * * * *', async () => {
+  console.log('⏱️ Running merged order auto-execution job...');
+
+  try {
+    await orderController.autoExecuteMergedOrders();
+  } catch (error) {
+    console.error('❌ Merged order auto-execution job failed:', error);
+  }
+});
+
 
 // ===============================
 // 🕒 CRON JOBS لنظام شؤون الموظفين

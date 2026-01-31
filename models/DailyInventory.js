@@ -81,11 +81,19 @@ const dailyInventorySchema = new mongoose.Schema({
     default: 0
   },
 
-  differenceReason: {
-    type: String,
-    enum: ['عادي', 'تهوية', 'تسريب', 'خطأ في القياس', 'أخرى'],
-    default: 'عادي'
-  },
+differenceReason: {
+  type: String,
+  enum: [
+    null,
+    'تبخر',
+    'تسريب',
+    'خطأ عداد',
+    'خطأ إدخال',
+    'غير ذلك'
+  ],
+  default: null
+}
+,
 
   // ✅ المصروفات (اختياري)
   expenses: [{

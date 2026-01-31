@@ -928,7 +928,6 @@ exports.getOrders = async (req, res) => {
       }
     }
 
-    // جلب الطلبات مع جميع العلاقات
     const orders = await Order.find(filter)
       .populate('customer', 'name code phone email city area address')
       .populate('supplier', 'name company contactPerson phone email address city area')
@@ -1099,7 +1098,6 @@ exports.getOrders = async (req, res) => {
       orderSource: 'مورد'
     }),
 
-    // ⭐ طلبات العميل + الطلبات المدمجة اللي فيها عميل
     customer: await Order.countDocuments({
       ...filter,
       $or: [
@@ -4231,13 +4229,124 @@ exports.checkArrivalNotifications = async () => {
 };
 
 
+async function finalizeMergedOrder(order, options = {}) {
+  const reasonLabel = options.reasonLabel || 'بعد انتهاء وقت التحميل';
+  const logPrefix = options.logPrefix || 'Auto executed merged order';
+
+  if (!order || order.status === 'تم التنفيذ') {
+    return false;
+  }
+
+  const now = new Date();
+  const oldStatus = order.status;
+
+  order.status = 'تم التنفيذ';
+  order.mergeStatus = 'مكتمل';
+  order.completedAt = now;
+  order.updatedAt = now;
+
+  await order.save();
+
+  console.log(
+    `✅ ${logPrefix} ${order.orderNumber} من "${oldStatus}" إلى "تم التنفيذ"`
+  );
+
+  const relatedOrders = await Order.find({
+    _id: { $ne: order._id },
+    mergedWithOrderId: order._id
+  });
+
+  for (const related of relatedOrders) {
+    if (related.status === 'تم التنفيذ') continue;
+
+    const oldRelatedStatus = related.status;
+
+    related.status = 'تم التنفيذ';
+    related.mergeStatus = 'مكتمل';
+    related.completedAt = now;
+    related.updatedAt = now;
+
+    await related.save();
+
+    console.log(
+      `💡 Related order ${related.orderNumber} auto executed from "${oldRelatedStatus}"`
+    );
+
+    await Activity.create({
+      orderId: related._id,
+      activityType: 'تغيير حالة',
+      description: `تم تنفيذ الطلب تلقائيًا ${reasonLabel} بسبب تنفيذ الطلب المدمج ${order.orderNumber}`,
+      performedBy: null,
+      performedByName: 'النظام',
+      changes: {
+        الحالة: `من: ${oldRelatedStatus} → إلى: تم التنفيذ`
+      }
+    });
+  }
+
+  const User = require('../models/User');
+  const adminUsers = await User.find({
+    role: { $in: ['admin', 'owner'] },
+    isActive: true
+  });
+
+  if (adminUsers.length) {
+    await Notification.create({
+      type: 'execution_completed',
+      title: 'تم التنفيذ',
+      message: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا ${reasonLabel}`,
+      data: {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        oldStatus,
+        newStatus: 'تم التنفيذ',
+        auto: true,
+        isMerged: true
+      },
+      recipients: adminUsers.map(u => ({ user: u._id })),
+      createdBy: order.createdBy?._id || order.createdBy
+    });
+  }
+
+  await Activity.create({
+    orderId: order._id,
+    activityType: 'تغيير حالة',
+    description: `تم تنفيذ الطلب تلقائيًا ${reasonLabel} (طلب مدمج)`,
+    performedBy: null,
+    performedByName: 'النظام',
+    changes: {
+      الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`
+    }
+  });
+
+  try {
+    const emails = await getOrderEmails(order);
+    if (emails && emails.length) {
+      await sendEmail({
+        to: emails,
+        subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
+        html: EmailTemplates.orderStatusTemplate(
+          order,
+          oldStatus,
+          'تم التنفيذ',
+          'النظام'
+        )
+      });
+    }
+  } catch (e) {
+    console.error(`❌ Email failed for ${order.orderNumber}`, e.message);
+  }
+
+  return true;
+}
+
 
 exports.checkCompletedLoading = async () => {
   try {
     const now = new Date();
 
     const orders = await Order.find({
-      orderSource: 'مدمج',
+      // orderSource: 'مدمج',
       status: {
         $in: [
           'تم الدمج',
@@ -4257,129 +4366,57 @@ exports.checkCompletedLoading = async () => {
 
     if (!orders.length) return;
 
-    const User = require('../models/User');
-    const Notification = require('../models/Notification');
-    const Activity = require('../models/Activity');
-
     for (const order of orders) {
-
       if (typeof order.getFullArrivalDateTime !== 'function') continue;
 
       const arrivalDateTime = order.getFullArrivalDateTime();
       if (!arrivalDateTime) continue;
-
       if (now < arrivalDateTime) continue;
 
-   
-      const oldStatus = order.status;
-
-      order.status = 'تم التنفيذ';
-      order.mergeStatus = 'مكتمل';
-      order.completedAt = now;
-      order.updatedAt = now;
-
-      await order.save();
-
-      console.log(
-        `✅ Auto executed merged order ${order.orderNumber} from "${oldStatus}" to "تم التنفيذ"`
-      );
-
-      if (order.mergedWithOrderId) {
-        const relatedOrders = await Order.find({
-          _id: { $ne: order._id },
-          mergedWithOrderId: order._id
-        });
-
-        for (const related of relatedOrders) {
-          if (related.status === 'تم التنفيذ') continue;
-
-          const oldRelatedStatus = related.status;
-
-          related.status = 'تم التنفيذ';
-          related.mergeStatus = 'مكتمل';
-          related.completedAt = now;
-          related.updatedAt = now;
-
-          await related.save();
-
-          console.log(
-            `🔁 Related order ${related.orderNumber} auto executed from "${oldRelatedStatus}"`
-          );
-
-          await Activity.create({
-            orderId: related._id,
-            activityType: 'تغيير حالة',
-            description: `تم تنفيذ الطلب تلقائيًا بسبب تنفيذ الطلب المدمج ${order.orderNumber}`,
-            performedBy: null,
-            performedByName: 'النظام',
-            changes: {
-              الحالة: `من: ${oldRelatedStatus} → إلى: تم التنفيذ`
-            }
-          });
-        }
-      }
-
-   
-      const adminUsers = await User.find({
-        role: { $in: ['admin', 'owner'] },
-        isActive: true
+      await finalizeMergedOrder(order, {
+        reasonLabel: 'بعد انتهاء وقت التحميل',
+        logPrefix: 'Auto executed merged order (arrival timer)'
       });
-
-      if (adminUsers.length) {
-        await Notification.create({
-          type: 'execution_completed',
-          title: 'تم التنفيذ',
-          message: `تم تنفيذ الطلب ${order.orderNumber} تلقائيًا بعد انتهاء وقت التوصيل`,
-          data: {
-            orderId: order._id,
-            orderNumber: order.orderNumber,
-            oldStatus,
-            newStatus: 'تم التنفيذ',
-            auto: true,
-            isMerged: true
-          },
-          recipients: adminUsers.map(u => ({ user: u._id })),
-          createdBy: order.createdBy?._id
-        });
-      }
-
-      await Activity.create({
-        orderId: order._id,
-        activityType: 'تغيير حالة',
-        description: `تم تنفيذ الطلب تلقائيًا بعد انتهاء وقت التوصيل (طلب مدمج)`,
-        performedBy: null,
-        performedByName: 'النظام',
-        changes: {
-          الحالة: `من: ${oldStatus} → إلى: تم التنفيذ`
-        }
-      });
-
-      try {
-        const emails = await getOrderEmails(order);
-        if (emails && emails.length) {
-          await sendEmail({
-            to: emails,
-            subject: `✅ تم تنفيذ الطلب ${order.orderNumber}`,
-            html: EmailTemplates.orderStatusTemplate(
-              order,
-              oldStatus,
-              'تم التنفيذ',
-              'النظام'
-            )
-          });
-        }
-      } catch (e) {
-        console.error(`❌ Email failed for ${order.orderNumber}`, e.message);
-      }
     }
-
   } catch (error) {
     console.error('❌ Error in checkCompletedLoading:', error);
   }
 };
 
+exports.autoExecuteMergedOrders = async () => {
+  try {
+    const now = new Date();
+    const threshold = new Date(now.getTime() - 2 * 60 * 60 * 1000);
 
+    const orders = await Order.find({
+      orderSource: 'مدمج',
+      status: 'تم الدمج',
+      completedAt: { $exists: false }
+    })
+      .populate('customer', 'name email')
+      .populate('supplier', 'name email')
+      .populate('createdBy', 'name email');
 
+    if (!orders.length) return;
+
+    for (const order of orders) {
+      const mergedAtSource =
+        order.mergedWithInfo?.mergedAt || order.mergedAt || order.createdAt;
+      if (!mergedAtSource) continue;
+
+      const mergedAt = new Date(mergedAtSource);
+      if (isNaN(mergedAt.getTime())) continue;
+      if (mergedAt > threshold) continue;
+
+      await finalizeMergedOrder(order, {
+        reasonLabel: 'بعد مرور ساعتين على الدمج',
+        logPrefix: 'Auto executed merged order (merge timer)'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in autoExecuteMergedOrders:', error);
+  }
+};
 
 exports.getOrderStats = async (req, res) => {
   try {
@@ -4429,7 +4466,18 @@ exports.getOrderStats = async (req, res) => {
 }
 ,
           completedOrders: {
-            $sum: { $cond: [{ $in: ['$status', ['تم التسليم', 'مكتمل']] }, 1, 0] }
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$orderSource', 'مدمج'] },
+                    { $eq: ['$status', 'تم التنفيذ'] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
           },
           cancelledOrders: {
             $sum: { $cond: [{ $eq: ['$status', 'ملغى'] }, 1, 0] }
