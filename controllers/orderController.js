@@ -4346,7 +4346,7 @@ exports.checkCompletedLoading = async () => {
     const now = new Date();
 
     const orders = await Order.find({
-      // orderSource: 'مدمج',
+      orderSource: 'مدمج',
       status: {
         $in: [
           'تم الدمج',
